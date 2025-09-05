@@ -1,14 +1,14 @@
-from .egospeed_utils import *
+from egospeed_utils import *
 import torch
 
 class EgoSpeedBackbone(nn.Module):
     """
     EgoSpeed Backbone
     """
-    def __init__(self, nc=3, anchors=None):
+    def __init__(self, nc=3, ch=()):
         super().__init__()
-        # self.nc = nc  # number of CIPO classes
-        # self.anchors = anchors
+        # nc = number of CIPO classes
+        # ch = channel sizes tuple
         self.p1 =[]
         self.p2 =[]
         self.p3 =[]
