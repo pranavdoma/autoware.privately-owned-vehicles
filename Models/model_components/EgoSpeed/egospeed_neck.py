@@ -1,5 +1,6 @@
-from .egospeed_utils import *
+from egospeed_utils import *
 import torch
+import torch.nn as nn
 
 class EgoSpeedNeck(nn.Module):
     """
@@ -7,6 +8,7 @@ class EgoSpeedNeck(nn.Module):
     """
     def __init__(self, in_channels, out_channels):
         super(EgoSpeedNeck, self).__init__()
+        # in_channels and out_channels are tuples of channel sizes
         self.upsample1 =  torch.nn.Upsample(scale_factor=2)
         self.c3k2_5 = C3k2(512 + 512, 512, n=1, shortcut=False)
 
