@@ -1,54 +1,110 @@
-from .egospeed_utils import *
+from egospeed_utils import *
 import torch
 import torch.nn as nn
+class DFL(nn.Module):
+    """
+    Integral module of Distribution Focal Loss (DFL).
+    This version now matches the reference implementation exactly.
+    """
+    def __init__(self, c1=16):
+        super().__init__()
+        self.conv = nn.Conv2d(c1, 1, 1, bias=False).requires_grad_(False)
+        x = torch.arange(c1, dtype=torch.float)
+        self.conv.weight.data[:] = nn.Parameter(x.view(1, c1, 1, 1))
+        self.c1 = c1
+
+    def forward(self, x):
+        """Forward pass for DFL."""
+        # Input shape: (batch_size, 4 * reg_max, num_anchor_points)
+        bs, _, num_points = x.shape
+        # Reshape, transpose, apply softmax, and then the convolution
+        # This calculates the weighted sum for the distribution
+        return self.conv(x.view(bs, 4, self.c1, num_points).transpose(2, 1).softmax(1)).view(bs, 4, num_points)
+
 
 class EgoSpeedHead(nn.Module):
     """
-    EgoSpeed Head
+    MODIFIED EgoSpeed Head: Anchor-Free and Decoupled.
+    This version is modified to follow the anchor-free design pattern.
+    It no longer uses pre-defined anchor boxes. Instead, it predicts the
+    distances from a grid point to the four sides of a bounding box.
     """
     def __init__(self, nc=3, ch=()):  # nc=3 for CIPO levels 0,1,2
         super(EgoSpeedHead, self).__init__()
         self.nc = nc  # number of classes
-        self.no = nc + 5  # number of outputs per anchor (x,y,w,h,obj,c1,c2,c3)
         self.nl = len(ch)  # number of detection layers
-        self.na = 3  # number of anchors
-        self.grid = [torch.zeros(1)] * self.nl
-        self.anchor_grid = [torch.zeros(1)] * self.nl
-        self.stride = torch.zeros(self.nl)
+        self.reg_max = 16  # DFL channels, defines the range for distance prediction
+        self.no = nc + self.reg_max * 4  # number of outputs per anchor point
+
+        # Define the strides for each detection layer (P3, P4, P5)
+        strides = torch.tensor([8., 16., 32.])
+        self.register_buffer('stride', strides)
         
-        # Detection head convolutions
-        self.cv2 = nn.ModuleList(
-            nn.Sequential(
-                Conv(x, x, k=3, s=1),
-                Conv(x, x, k=3, s=1),
-                Conv(x, self.na * self.no, k=1, s=1)
-            ) for x in ch
-        )
-        
+        # Initialize the DFL module, which is essential for decoding the box predictions
+        self.dfl = DFL(self.reg_max)
+
+        # Decoupled head: Separate convolutional modules for box and class prediction
+        self.box_preds = nn.ModuleList()
+        self.cls_preds = nn.ModuleList()
+        for i in ch:
+            self.box_preds.append(
+                nn.Sequential(
+                    Conv(i, i, k=3),
+                    Conv(i, i, k=3),
+                    nn.Conv2d(i, 4 * self.reg_max, 1)
+                )
+            )
+            self.cls_preds.append(
+                nn.Sequential(
+                    Conv(i, i, k=3),
+                    Conv(i, i, k=3),
+                    nn.Conv2d(i, self.nc, 1)
+                )
+            )
+
     def forward(self, x):
-        """Forward pass through detection head"""
-        z = []  # inference output
+        """Forward pass through the anchor-free head."""
         for i in range(self.nl):
-            x[i] = self.cv2[i](x[i])  # conv
-            bs, _, ny, nx = x[i].shape
-            x[i] = x[i].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
-            
-            if not self.training:  # inference
-                if self.grid[i].shape[2:4] != x[i].shape[2:4]:
-                    self.grid[i], self.anchor_grid[i] = self._make_grid(nx, ny, i)
-                
-                xy, wh, conf = x[i].sigmoid().split((2, 2, self.nc + 1), 4)
-                xy = (xy * 2 + self.grid[i]) * self.stride[i]  # xy
-                wh = (wh * 2) ** 2 * self.anchor_grid[i]  # wh
-                y = torch.cat((xy, wh, conf), 4)
-                z.append(y.view(bs, -1, self.no))
+            # Pass the input through the separate box and class prediction branches
+            x[i] = torch.cat((self.box_preds[i](x[i]), self.cls_preds[i](x[i])), 1)
+
+        if self.training:
+            return x
+
+        # --- INFERENCE MODE ---
+        # Decode the raw output into final bounding boxes
+        bs = x[0].shape[0]
+        # Create the grid of anchor points and the corresponding strides
+        anchor_points, stride_tensor = self._make_anchor_points_and_strides(x)
+
+        # Concatenate and reshape the outputs from all detection layers
+        x_cat = torch.cat([xi.view(bs, self.no, -1) for xi in x], 2)
+        box_dist, cls_out = x_cat.split((self.reg_max * 4, self.nc), 1)
         
-        return x if self.training else (torch.cat(z, 1), x)
+        # Use DFL to decode the box distribution into ltrb (left, top, right, bottom) distances
+        box_ltrb = self.dfl(box_dist) * stride_tensor
+        
+        # Calculate the final box coordinates (x1, y1, x2, y2)
+        x1y1 = anchor_points - box_ltrb[:, :2] # top-left
+        x2y2 = anchor_points + box_ltrb[:, 2:] # bottom-right
+        
+        # Combine box coordinates and apply sigmoid to class predictions for final output
+        return torch.cat((x1y1, x2y2, cls_out.sigmoid()), 1)
     
-    def _make_grid(self, nx=20, ny=20, i=0):
-        """Create mesh grid for predictions"""
-        d = self.anchors[i].device
-        yv, xv = torch.meshgrid([torch.arange(ny).to(d), torch.arange(nx).to(d)])
-        grid = torch.stack((xv, yv), 2).expand((1, self.na, ny, nx, 2)).float()
-        anchor_grid = (self.anchors[i].clone() * self.stride[i]).view((1, self.na, 1, 1, 2)).expand((1, self.na, ny, nx, 2)).float()
-        return grid, anchor_grid
+    def _make_anchor_points_and_strides(self, features):
+        """Generates a grid of anchor points and their strides for all feature maps."""
+        anchor_points, stride_tensor = [], []
+        dtype, device = features[0].dtype, features[0].device
+        for i, stride in enumerate(self.stride):
+            _, _, h, w = features[i].shape
+            # Create a grid of (x, y) coordinates for this feature map
+            sx = torch.arange(w, device=device, dtype=dtype) + 0.5
+            sy = torch.arange(h, device=device, dtype=dtype) + 0.5
+            sy, sx = torch.meshgrid(sy, sx, indexing='ij')
+            
+            anchor_points.append(torch.stack((sx, sy), -1).view(-1, 2))
+            stride_tensor.append(torch.full((h * w,), stride, device=device, dtype=dtype))
+        
+        # Concatenate the points and strides from all layers
+        return torch.cat(anchor_points).transpose(0, 1), torch.cat(stride_tensor)
+
