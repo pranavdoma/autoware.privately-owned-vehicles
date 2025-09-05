@@ -1,7 +1,8 @@
-from .egospeed_backbone import EgoSpeedBackbone
-from .egospeed_neck import EgoSpeedNeck
-from .egospeed_head import EgoSpeedHead
+from egospeed_backbone import EgoSpeedBackbone
+from egospeed_neck import EgoSpeedNeck
+from egospeed_head import EgoSpeedHead
 import torch.nn as nn
+import torch
 
 
 class EgoSpeedNetwork(nn.Module):
@@ -15,6 +16,6 @@ class EgoSpeedNetwork(nn.Module):
         self.head = EgoSpeedHead(nc, ch)
 
     def forward(self, x):
-        x = self.backbone(x)
-        x = self.neck(x)
-        return self.head(list(x))
+        p3, p4, p5 = self.backbone(x)
+        p3, p4, p5 = self.neck(p3, p4, p5)
+        return self.head([p3, p4, p5])
