@@ -1,111 +1,75 @@
-# The autopad is used to detect the padding value for the Convolution layer
 import torch
-import torch.nn as nn
+import torch.nn as nn   
+
+# ============================================
+# Base Components (from provided utils)
+# ============================================
 
 def autopad(k, p=None, d=1):
+    """Auto-calculate padding for Conv layer"""
     if d > 1:
-        # actual kernel-size
         k = d * (k - 1) + 1 if isinstance(k, int) else [d * (x - 1) + 1 for x in k]
     if p is None:
-        # auto-pad
         p = k // 2 if isinstance(k, int) else [x // 2 for x in k]
     return p
-  
-# This is the activation function used in YOLOv11
+
 class SiLU(nn.Module):
+    """SiLU activation function"""
     @staticmethod
     def forward(x):
         return x * torch.sigmoid(x)
 
-# The base Conv Block
-
-class Conv(torch.nn.Module):
-
-    def __init__(self, in_ch, out_ch, k=1, s=1, p=0, g=1):
-        # in_ch = input channels
-        # out_ch = output channels
-        # activation = the torch function of the activation function (SiLU or Identity)
-        # k = kernel size
-        # s = stride
-        # p = padding
-        # g = groups
+class Conv(nn.Module):
+    """Standard convolution with batch norm and activation"""
+    def __init__(self, in_ch, out_ch, k=1, s=1, p=None, g=1, act=True):
         super().__init__()
-        self.conv = torch.nn.Conv2d(in_ch, out_ch, k, s, p, groups=g, bias=False)
-        self.norm = torch.nn.BatchNorm2d(out_ch, eps=0.001, momentum=0.03)
-        self.relu = SiLU()
+        p = autopad(k, p)
+        self.conv = nn.Conv2d(in_ch, out_ch, k, s, p, groups=g, bias=False)
+        self.norm = nn.BatchNorm2d(out_ch, eps=0.001, momentum=0.03)
+        self.relu = SiLU() if act else nn.Identity()
+
     def forward(self, x):
-        # Passing the input by convolution layer and using the activation function
-        # on the normalized output
         return self.relu(self.norm(self.conv(x)))
-        
-    def fuse_forward(self, x):
-        return self.relu(self.conv(x))
 
-# The Bottlneck block
-
-class Residual(torch.nn.Module):
+class Residual(nn.Module):
+    """Residual block for C3k2"""
     def __init__(self, ch, e=0.5):
         super().__init__()
-        self.conv1 = Conv(ch, int(ch * e), k=3, p=1)
-        self.conv2 = Conv(int(ch * e), ch, k=3, p=1)
+        c_ = int(ch * e)
+        self.conv1 = Conv(ch, c_, k=3)
+        self.conv2 = Conv(c_, ch, k=3)
 
     def forward(self, x):
-        # The input is passed through 2 Conv blocks and if the shortcut is true and
-        # if input and output channels are same, then it will the input as residual
         return x + self.conv2(self.conv1(x))
 
-# The C3k Module
-class C3K(torch.nn.Module):
-    def __init__(self, in_ch, out_ch):
+class C3k2(nn.Module):
+    """C3k2 module with CSP bottleneck"""
+    def __init__(self, in_ch, out_ch, n=1, shortcut=False, e=0.5):
         super().__init__()
-        self.conv1 = Conv(in_ch, out_ch // 2)
-        self.conv2 = Conv(in_ch, out_ch // 2)
-        self.conv3 = Conv(2 * (out_ch // 2), out_ch)
-        self.res_m = torch.nn.Sequential(Residual(out_ch // 2, e=1.0),
-                                         Residual(out_ch // 2, e=1.0))
-
-    def forward(self, x):
-        y = self.res_m(self.conv1(x)) # Process half of the input channels
-        # Process the other half directly, Concatenate along the channel dimension
-        return self.conv3(torch.cat((y, self.conv2(x)), dim=1))
-        
-# The C3K2 Module
-
-class C3K2(torch.nn.Module):
-    def __init__(self, in_ch, out_ch, n, csp, r):
-        super().__init__()
-        self.conv1 = Conv(in_ch, 2 * (out_ch // r))
-        self.conv2 = Conv((2 + n) * (out_ch // r), out_ch)
-
-        if not csp:
-            # Using the CSP Module when mentioned True at shortcut
-            self.res_m = torch.nn.ModuleList(Residual(out_ch // r) for _ in range(n))
-        else:
-            # Using the Bottlenecks when mentioned False at shortcut
-            self.res_m = torch.nn.ModuleList(C3K(out_ch // r, out_ch // r) for _ in range(n))
+        c_ = int(out_ch * e)
+        self.conv1 = Conv(in_ch, 2 * c_, 1)
+        self.conv2 = Conv((2 + n) * c_, out_ch, 1)
+        self.res_m = nn.ModuleList(Residual(c_) for _ in range(n))
 
     def forward(self, x):
         y = list(self.conv1(x).chunk(2, 1))
         y.extend(m(y[-1]) for m in self.res_m)
-        return self.conv2(torch.cat(y, dim=1))
-        
- # Code for SPFF Block
-class SPPF(nn.Module):
+        return self.conv2(torch.cat(y, 1))
 
+class SPPF(nn.Module):
+    """Spatial Pyramid Pooling - Fast"""
     def __init__(self, c1, c2, k=5):
         super().__init__()
-        c_          = c1 // 2
-        self.cv1    = Conv(c1, c_, 1, 1)
-        self.cv2    = Conv(c_ * 4, c2, 1, 1)
-        self.m      = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
+        c_ = c1 // 2
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv2 = Conv(c_ * 4, c2, 1, 1)
+        self.m = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
 
     def forward(self, x):
-        x = self.cv1(x) # Starting with a Conv Block
-        y1 = self.m(x) # First MaxPool layer
-        y2 = self.m(y1) # Second MaxPool layer
-        return self.cv2(torch.cat((x, y1, y2, self.m(y2)), 1)) # Ending with Conv Block
-
-# Code for the Attention Module
+        x = self.cv1(x)
+        y1 = self.m(x)
+        y2 = self.m(y1)
+        return self.cv2(torch.cat((x, y1, y2, self.m(y2)), 1))
 
 class Attention(nn.Module):
     """Multi-head attention module"""
@@ -132,7 +96,6 @@ class Attention(nn.Module):
         x = (v @ attn.transpose(-2, -1)).view(b, c, h, w) + self.conv1(v.reshape(b, c, h, w))
         return self.conv2(x)
 
-# Code for the PSABlock
 class PSABlock(nn.Module):
     """PSA attention block"""
     def __init__(self, ch, num_heads=8):
@@ -147,7 +110,6 @@ class PSABlock(nn.Module):
         x = x + self.conv1(x)
         return x + self.conv2(x)
 
-# Code for the C2PSA
 class C2PSA(nn.Module):
     """Cross Stage Partial with Spatial Attention"""
     def __init__(self, c1, c2, n=1, e=0.5):
@@ -162,4 +124,20 @@ class C2PSA(nn.Module):
         x, y = self.conv1(x).chunk(2, 1)
         return self.conv2(torch.cat((x, self.res_m(y)), 1))
 
-       
+class Concat(nn.Module):
+    """Concatenate tensors along dimension"""
+    def __init__(self, dimension=1):
+        super().__init__()
+        self.d = dimension
+
+    def forward(self, x):
+        return torch.cat(x, self.d)
+
+class Upsample(nn.Module):
+    """Upsample using nearest neighbor"""
+    def __init__(self, scale_factor=2):
+        super().__init__()
+        self.scale_factor = scale_factor
+
+    def forward(self, x):
+        return nn.functional.interpolate(x, scale_factor=self.scale_factor, mode='nearest')
