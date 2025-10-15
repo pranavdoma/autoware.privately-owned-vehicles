@@ -28,7 +28,7 @@ struct FrameDetectionsTopic {
     // Fixed-size buffers for performance.
     // Ensure these are large enough for your use case.
     static constexpr uint32_t MAX_DETECTIONS = 100;
-    static constexpr uint64_t MAX_FRAME_SIZE = 1920 * 1080 * 3; // 1080p RGB
+    static constexpr uint64_t MAX_FRAME_SIZE = 3840 * 2160 * 3; // 4K UHD RGB (24,883,200 bytes)
 
     DetectionPOD detections[MAX_DETECTIONS];
     uint8_t frame_data[MAX_FRAME_SIZE];
