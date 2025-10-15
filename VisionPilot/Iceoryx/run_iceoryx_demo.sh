@@ -11,7 +11,7 @@
 #
 
 # --- Configuration ---
-VIDEO_PATH="/home/pranavdoma/Downloads/autoware.privately-owned-vehicles/VisionPilot/ROS2/data/Road_Driving_Scenes_Normal.mp4"
+VIDEO_PATH="/home/pranavdoma/Downloads/autoware.privately-owned-vehicles/VisionPilot/ROS2/data/mumbai.mp4"
 MODEL_PATH="/home/pranavdoma/Downloads/autoware.privately-owned-vehicles/VisionPilot/ROS2/data/models/AutoSpeed_n.onnx"
 PRECISION="fp16"
 # ---------------------
@@ -52,26 +52,22 @@ fi
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 cd "$SCRIPT_DIR"
 
-# 1. Build the applications
-echo "--- Building Iceoryx demo applications ---"
-mkdir -p build
-cd build
-cmake ..
-make -j$(nproc)
-cd ..
-echo "--- Build complete ---"
-echo ""
-
-# 2. Start Iceoryx Router (roudi)
+# 1. Start Iceoryx Router (roudi)
 echo "--- Starting Iceoryx router (iox-roudi) in the background ---"
-iox-roudi > /dev/null 2>&1 &
-ROUDI_PID=$!
-# Give roudi a moment to initialize
-sleep 1
-echo "iox-roudi started with PID $ROUDI_PID."
+# Check if roudi is already running to avoid errors
+if ! pgrep -x "iox-roudi" > /dev/null
+then
+    iox-roudi > /dev/null 2>&1 &
+    ROUDI_PID=$!
+    # Give roudi a moment to initialize
+    sleep 1
+    echo "iox-roudi started with PID $ROUDI_PID."
+else
+    echo "iox-roudi is already running."
+fi
 echo ""
 
-# 3. Start the Subscriber in the background
+# 2. Start the Subscriber in the background
 echo "--- Starting subscriber in the background ---"
 ./build/subscriber > /dev/null 2>&1 &
 SUBSCRIBER_PID=$!
@@ -79,7 +75,7 @@ echo "Subscriber started with PID $SUBSCRIBER_PID."
 echo "An OpenCV window from the subscriber should appear shortly."
 echo ""
 
-# 4. Start the Publisher in the foreground
+# 3. Start the Publisher in the foreground
 echo "--- Starting publisher in the foreground ---"
 echo "Video: $VIDEO_PATH"
 echo "Model: $MODEL_PATH"
