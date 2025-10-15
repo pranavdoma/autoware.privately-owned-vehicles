@@ -52,16 +52,16 @@ fi
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 cd "$SCRIPT_DIR"
 
-# 1. Start Iceoryx Router (roudi)
+# 1. Start Iceoryx Router (roudi) with custom configuration
 echo "--- Starting Iceoryx router (iox-roudi) in the background ---"
 # Check if roudi is already running to avoid errors
 if ! pgrep -x "iox-roudi" > /dev/null
 then
-    iox-roudi > /dev/null 2>&1 &
+    iox-roudi -c "$SCRIPT_DIR/roudi_config.toml" > /dev/null 2>&1 &
     ROUDI_PID=$!
     # Give roudi a moment to initialize
     sleep 1
-    echo "iox-roudi started with PID $ROUDI_PID."
+    echo "iox-roudi started with PID $ROUDI_PID (using custom config for large frames)."
 else
     echo "iox-roudi is already running."
 fi
