@@ -18,13 +18,19 @@ set(COMMON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../common)
 add_library(gstreamer_engine STATIC
     ${COMMON_DIR}/sensors/gstreamer_engine.cpp
 )
-target_include_directories(gstreamer_engine PUBLIC ${COMMON_DIR}/include)
+target_include_directories(gstreamer_engine PUBLIC
+    ${COMMON_DIR}/include
+    ${OpenCV_INCLUDE_DIRS}
+)
 # GStreamer requires pkg-config to find its libraries
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GSTREAMER REQUIRED gstreamer-1.0 gstreamer-app-1.0)
 target_include_directories(gstreamer_engine PUBLIC ${GSTREAMER_INCLUDE_DIRS})
-target_link_libraries(gstreamer_engine PUBLIC ${GSTREAMER_LIBRARIES})
-target_compile_definitions(gstreamer_engine PRIVATE LOG_TYPE=0) # Use printf for logging
+target_link_libraries(gstreamer_engine PUBLIC
+    ${GSTREAMER_LIBRARIES}
+    ${OpenCV_LIBS}
+)
+target_compile_definitions(gstreamer_engine PUBLIC LOG_TYPE=0) # Use printf for logging
 
 # AutoSpeed TensorRT Backend Library
 add_library(autospeed_backend STATIC
@@ -39,10 +45,9 @@ target_link_libraries(autospeed_backend PUBLIC
     gstreamer_engine
     ${CUDA_LIBRARIES}
     nvinfer
-    nvparsers
     nvonnxparser
 )
-target_compile_definitions(autospeed_backend PRIVATE LOG_TYPE=0) # Use printf for logging
+target_compile_definitions(autospeed_backend PUBLIC LOG_TYPE=0) # Use printf for logging
 
 # Set include directory for the topic header
 include_directories(include)
