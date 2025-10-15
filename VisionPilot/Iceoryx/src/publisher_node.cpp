@@ -59,6 +59,11 @@ int main(int argc, char** argv)
     std::cout << "Capturing from: " << stream_source << std::endl;
     std::cout << "Publishing to Iceoryx topic 'Vision/AutoSpeed/Frame'" << std::endl;
 
+    // Performance tracking
+    int frame_count = 0;
+    long total_inference_us = 0;
+    long total_publish_us = 0;
+
     while (gstreamer.isActive()) {
         // A. Capture
         auto capture_start_time = now_ns();
@@ -69,9 +74,14 @@ int main(int argc, char** argv)
         }
 
         // B. Infer
+        auto infer_start = now_ns();
         std::vector<Detection> detections = backend.inference(frame, conf_thresh, iou_thresh);
+        auto infer_end = now_ns();
+        long inference_us = (infer_end - infer_start) / 1000;
+        total_inference_us += inference_us;
 
         // C. Publish
+        auto publish_start = now_ns();
         publisher.loan()
             .and_then([&](auto& sample) {
                 // Get timestamps
@@ -108,9 +118,28 @@ int main(int argc, char** argv)
             .or_else([](auto& error) {
                 std::cerr << "Failed to loan sample, error: " << error << std::endl;
             });
+        
+        auto publish_end = now_ns();
+        long publish_us = (publish_end - publish_start) / 1000;
+        total_publish_us += publish_us;
+        
+        frame_count++;
+        
+        // Print metrics every 30 frames
+        if (frame_count % 30 == 0) {
+            std::cout << "\n========================================\n";
+            std::cout << "PUBLISHER METRICS - Frame " << frame_count << "\n";
+            std::cout << "========================================\n";
+            std::cout << "Avg Inference Time:  " << std::fixed << std::setprecision(3) 
+                      << (total_inference_us / (double)frame_count / 1000.0) << " ms\n";
+            std::cout << "Avg Publish Time:    " << (total_publish_us / (double)frame_count / 1000.0) << " ms\n";
+            std::cout << "Detections:          " << detections.size() << "\n";
+            std::cout << "========================================\n\n";
+        }
     }
 
     gstreamer.stop();
-    std::cout << "Publisher stopped." << std::endl;
+    std::cout << "\nPublisher stopped." << std::endl;
+    std::cout << "Total frames processed: " << frame_count << std::endl;
     return 0;
 }
