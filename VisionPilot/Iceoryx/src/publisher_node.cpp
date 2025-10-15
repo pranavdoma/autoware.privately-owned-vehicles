@@ -95,12 +95,12 @@ int main(int argc, char** argv)
                 // Copy detection data
                 sample->num_detections = std::min((uint32_t)detections.size(), FrameDetectionsTopic::MAX_DETECTIONS);
                 for (uint32_t i = 0; i < sample->num_detections; ++i) {
-                    sample->detections[i] = {
-                        detections[i].x1, detections[i].y1, 
-                        detections[i].x2, detections[i].y2,
-                        detections[i].score,
-                        detections[i].class_id
-                    };
+                    sample->detections[i].x1 = detections[i].x1;
+                    sample->detections[i].y1 = detections[i].y1;
+                    sample->detections[i].x2 = detections[i].x2;
+                    sample->detections[i].y2 = detections[i].y2;
+                    sample->detections[i].score = detections[i].confidence;
+                    sample->detections[i].class_id = detections[i].class_id;
                 }
                 
                 sample.publish();
