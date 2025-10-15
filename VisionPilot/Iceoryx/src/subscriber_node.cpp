@@ -59,8 +59,9 @@ int main(int argc, char** argv)
     cv::resizeWindow("Iceoryx Subscriber", 960, 540);
 
     // For metrics
-    std::atomic<long> total_ipc_us{0};
-    std::atomic<long> total_e2e_us{0};
+    std::atomic<long> total_ipc_us{0};           // IPC overhead: publish → receive
+    std::atomic<long> total_e2e_us{0};           // End-to-end: capture → receive
+    std::atomic<long> total_visualization_us{0}; // Time to draw and display
     std::atomic<int> frame_count{0};
     std::atomic<bool> running{true};
 
@@ -78,6 +79,7 @@ int main(int argc, char** argv)
                 int count = frame_count.fetch_add(1) + 1;
 
                 // B. Reconstruct frame and detections
+                auto viz_start = now_ns();
                 cv::Mat frame(sample->frame_height, sample->frame_width, CV_8UC3, (void*)sample->frame_data);
                 std::vector<DetectionPOD> detections;
                 detections.assign(sample->detections, sample->detections + sample->num_detections);
@@ -89,16 +91,26 @@ int main(int argc, char** argv)
                 if (cv::waitKey(1) == 'q') {
                     running.store(false);
                 }
+                
+                auto viz_end = now_ns();
+                long viz_us = (viz_end - viz_start) / 1000;
+                total_visualization_us.fetch_add(viz_us);
 
                 // D. Print metrics periodically
-                if (count % 100 == 0) {
+                if (count % 30 == 0) {
                     long avg_ipc = total_ipc_us.load() / count;
                     long avg_e2e = total_e2e_us.load() / count;
-                    std::cout << "\n--- Latency (avg over " << count << " frames) ---\n";
-                    std::cout << "  IPC (publish -> receive):       " << std::fixed << std::setprecision(2) 
+                    long avg_viz = total_visualization_us.load() / count;
+                    
+                    std::cout << "\n========================================\n";
+                    std::cout << "ICEORYX BENCHMARK - Frame " << count << "\n";
+                    std::cout << "========================================\n";
+                    std::cout << "IPC Latency (publish → receive): " << std::fixed << std::setprecision(3) 
                               << (avg_ipc / 1000.0) << " ms\n";
-                    std::cout << "  End-to-End (capture -> receive): " << (avg_e2e / 1000.0) << " ms\n";
-                    std::cout << "------------------------------------\n";
+                    std::cout << "End-to-End (capture → receive):  " << (avg_e2e / 1000.0) << " ms\n";
+                    std::cout << "Visualization (draw + display):  " << (avg_viz / 1000.0) << " ms\n";
+                    std::cout << "Detections in frame:             " << sample->num_detections << "\n";
+                    std::cout << "========================================\n\n";
                 }
             })
             .or_else([&](auto& result) {
