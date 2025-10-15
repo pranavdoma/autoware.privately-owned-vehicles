@@ -69,10 +69,11 @@ echo ""
 
 # 2. Start the Subscriber in the background
 echo "--- Starting subscriber in the background ---"
-./build/subscriber > /dev/null 2>&1 &
+./build/subscriber &
 SUBSCRIBER_PID=$!
 echo "Subscriber started with PID $SUBSCRIBER_PID."
 echo "An OpenCV window from the subscriber should appear shortly."
+echo "Subscriber metrics will be printed to this terminal."
 echo ""
 
 # 3. Start the Publisher in the foreground
