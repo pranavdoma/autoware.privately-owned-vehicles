@@ -78,13 +78,15 @@ int main(int argc, char** argv)
                 total_e2e_us.fetch_add(e2e_us);
                 int count = frame_count.fetch_add(1) + 1;
 
-                // B. Reconstruct frame and detections
+                // B. Create cv::Mat wrapper around shared memory (zero-copy!)
                 auto viz_start = now_ns();
                 cv::Mat frame(sample->frame_height, sample->frame_width, CV_8UC3, (void*)sample->frame_data);
+                
+                // Wrap detections array (no copy until visualization needs it)
                 std::vector<DetectionPOD> detections;
                 detections.assign(sample->detections, sample->detections + sample->num_detections);
 
-                // C. Visualize
+                // C. Visualize directly on shared memory frame
                 drawDetections(frame, detections);
                 cv::imshow("Iceoryx Subscriber", frame);
 
