@@ -7,6 +7,7 @@
 #include "../../common/backends/autospeed/tensorrt_engine.hpp"
 
 #include <iostream>
+#include <iomanip>
 #include <chrono>
 
 using namespace autoware_pov::vision;
@@ -65,45 +66,46 @@ int main(int argc, char** argv)
     long total_publish_us = 0;
 
     while (gstreamer.isActive()) {
-        // A. Capture
         auto capture_start_time = now_ns();
-        cv::Mat frame = gstreamer.getFrame();
-        if (frame.empty()) {
-            std::cerr << "Failed to capture frame, stopping." << std::endl;
-            break;
-        }
-
-        // B. Infer
-        auto infer_start = now_ns();
-        std::vector<Detection> detections = backend.inference(frame, conf_thresh, iou_thresh);
-        auto infer_end = now_ns();
-        long inference_us = (infer_end - infer_start) / 1000;
-        total_inference_us += inference_us;
-
-        // C. Publish
-        auto publish_start = now_ns();
+        
+        // Loan Iceoryx memory FIRST - work directly with shared memory (zero-copy)
         publisher.loan()
             .and_then([&](auto& sample) {
-                // Get timestamps
-                sample->capture_timestamp_ns = capture_start_time;
-                sample->publish_timestamp_ns = now_ns();
-
-                // Copy frame data
-                sample->frame_width = frame.cols;
-                sample->frame_height = frame.rows;
-                sample->frame_channels = frame.channels();
-                sample->frame_data_size = frame.total() * frame.elemSize();
-                
-                if (sample->frame_data_size > FrameDetectionsTopic::MAX_FRAME_SIZE) {
-                    std::cerr << "Error: Frame size (" << sample->frame_data_size 
-                              << " bytes) exceeds max buffer size (" 
-                              << FrameDetectionsTopic::MAX_FRAME_SIZE << " bytes)." << std::endl;
+                // A. Capture frame from GStreamer
+                cv::Mat gstreamer_frame = gstreamer.getFrame();
+                if (gstreamer_frame.empty()) {
+                    std::cerr << "Failed to capture frame, skipping." << std::endl;
                     return;
                 }
-                memcpy(sample->frame_data, frame.data, sample->frame_data_size);
 
-                // Copy detection data
-                sample->num_detections = std::min((uint32_t)detections.size(), FrameDetectionsTopic::MAX_DETECTIONS);
+                // B. Create cv::Mat wrapper around loaned shared memory (no copy!)
+                sample->frame_width = gstreamer_frame.cols;
+                sample->frame_height = gstreamer_frame.rows;
+                sample->frame_channels = gstreamer_frame.channels();
+                sample->frame_data_size = gstreamer_frame.total() * gstreamer_frame.elemSize();
+                
+                if (sample->frame_data_size > FrameDetectionsTopic::MAX_FRAME_SIZE) {
+                    std::cerr << "Error: Frame size exceeds buffer, skipping." << std::endl;
+                    return;
+                }
+
+                // Create Mat wrapper pointing to shared memory buffer
+                cv::Mat shared_frame(gstreamer_frame.rows, gstreamer_frame.cols, 
+                                    CV_8UC3, sample->frame_data);
+                
+                // Copy from GStreamer to shared memory (unavoidable, but only ONE copy)
+                gstreamer_frame.copyTo(shared_frame);
+
+                // C. Run inference directly on shared memory frame (no extra copy!)
+                auto infer_start = now_ns();
+                std::vector<Detection> detections = backend.inference(shared_frame, conf_thresh, iou_thresh);
+                auto infer_end = now_ns();
+                long inference_us = (infer_end - infer_start) / 1000;
+                total_inference_us += inference_us;
+
+                // D. Store detections and metadata directly in loaned sample
+                sample->num_detections = std::min((uint32_t)detections.size(), 
+                                                 FrameDetectionsTopic::MAX_DETECTIONS);
                 for (uint32_t i = 0; i < sample->num_detections; ++i) {
                     sample->detections[i].x1 = detections[i].x1;
                     sample->detections[i].y1 = detections[i].y1;
@@ -113,17 +115,19 @@ int main(int argc, char** argv)
                     sample->detections[i].class_id = detections[i].class_id;
                 }
                 
+                // E. Set timestamps and publish
+                sample->capture_timestamp_ns = capture_start_time;
+                sample->publish_timestamp_ns = now_ns();
                 sample.publish();
+
+                // Track publish overhead (timestamp setting is negligible)
+                long publish_us = (now_ns() - infer_end) / 1000;
+                total_publish_us += publish_us;
+                frame_count++;
             })
             .or_else([](auto& error) {
                 std::cerr << "Failed to loan sample, error: " << error << std::endl;
             });
-        
-        auto publish_end = now_ns();
-        long publish_us = (publish_end - publish_start) / 1000;
-        total_publish_us += publish_us;
-        
-        frame_count++;
         
         // Print metrics every 30 frames
         if (frame_count % 30 == 0) {
