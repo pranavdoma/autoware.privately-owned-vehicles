@@ -11,7 +11,7 @@
 #
 
 # --- Configuration ---
-VIDEO_PATH="/home/pranavdoma/Downloads/autoware.privately-owned-vehicles/VisionPilot/ROS2/data/mumbai.mp4"
+VIDEO_PATH="/home/pranavdoma/Downloads/autoware.privately-owned-vehicles/VisionPilot/ROS2/data/Road_Driving_Scenes_Normal.mp4"
 MODEL_PATH="/home/pranavdoma/Downloads/autoware.privately-owned-vehicles/VisionPilot/ROS2/data/models/AutoSpeed_n.onnx"
 PRECISION="fp16"
 # ---------------------
