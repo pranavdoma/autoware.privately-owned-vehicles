@@ -62,6 +62,7 @@ int main(int argc, char** argv)
 
     // Performance tracking
     int frame_count = 0;
+    uint32_t last_detection_count = 0;
     long total_inference_us = 0;
     long total_publish_us = 0;
 
@@ -106,6 +107,7 @@ int main(int argc, char** argv)
                 // D. Store detections and metadata directly in loaned sample
                 sample->num_detections = std::min((uint32_t)detections.size(), 
                                                  FrameDetectionsTopic::MAX_DETECTIONS);
+                last_detection_count = sample->num_detections;
                 for (uint32_t i = 0; i < sample->num_detections; ++i) {
                     sample->detections[i].x1 = detections[i].x1;
                     sample->detections[i].y1 = detections[i].y1;
@@ -137,7 +139,7 @@ int main(int argc, char** argv)
             std::cout << "Avg Inference Time:  " << std::fixed << std::setprecision(3) 
                       << (total_inference_us / (double)frame_count / 1000.0) << " ms\n";
             std::cout << "Avg Publish Time:    " << (total_publish_us / (double)frame_count / 1000.0) << " ms\n";
-            std::cout << "Detections:          " << detections.size() << "\n";
+            std::cout << "Detections:          " << last_detection_count << "\n";
             std::cout << "========================================\n\n";
         }
     }
