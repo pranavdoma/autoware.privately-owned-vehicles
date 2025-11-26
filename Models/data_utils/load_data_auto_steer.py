@@ -131,7 +131,7 @@ if __name__ == '__main__':
     # Create data loader
     data_loader = LoadDataAutoSteer(
         dataset_root=dataset_root,
-        temporal_length=3
+        temporal_length=2
     )
     
     # Get counts
