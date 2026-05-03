@@ -1,0 +1,8 @@
+//
+// Created by atanasko on 27.4.26.
+//
+
+#ifndef VISIONPILOT_VISUALIZATION_HPP
+#define VISIONPILOT_VISUALIZATION_HPP
+
+#endif //VISIONPILOT_VISUALIZATION_HPP
