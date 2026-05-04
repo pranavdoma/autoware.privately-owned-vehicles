@@ -2,6 +2,7 @@
 
 namespace camera_subscriber {
 
+
     ROS2ImageSubscriber::ROS2ImageSubscriber(
         const std::string &topic_name,
         size_t queue_size,
@@ -38,6 +39,7 @@ namespace camera_subscriber {
         RCLCPP_INFO(get_logger(), "ROS2 Image Subscriber initialized successfully");
 
     };
+
 
     void ROS2ImageSubscriber::image_callback(
         const sensor_msgs::msg::Image::SharedPtr msg
@@ -92,6 +94,44 @@ namespace camera_subscriber {
                                  static_cast<double>(msg->header.stamp.nanosec) / 1e9;
             metadata_queue_.push(metadata);
         }
-    }
+
+    };
+
+
+    cv::Mat ROS2ImageSubscriber::convert_ros2_image_to_opencv(
+        const sensor_msgs::msg::Image::SharedPtr &msg
+    ) {
+
+        try {
+            // Here I just use cv_bridge to convert ROS2 image message to OpenCV Mat
+            // Ref: https://docs.ros.org/en/diamondback/api/cv_bridge/html/c++/namespacecv__bridge.html
+            // For desired output encoding:
+            //      - "bgr8"  : commonly used for color images
+            //      - "mono8" : for grayscale
+            cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg, msg->encoding);
+            return cv_ptr->image;
+
+        } catch (cv_bridge::Exception &e) {
+            RCLCPP_ERROR(
+                get_logger(),
+                "cv_bridge exception: %s, encoding: %s",
+                e.what(),
+                msg->encoding.c_str()
+            );
+            return cv::Mat(); // Return empty mat on error
+
+        } catch (const std::exception &e) {
+            RCLCPP_ERROR(
+                get_logger(),
+                "Unexpected exception during image conversion: %s",
+                e.what()
+            );
+            return cv::Mat();
+        }
+
+    };
+
+
+    
 
 }; // namespace camera_subscriber

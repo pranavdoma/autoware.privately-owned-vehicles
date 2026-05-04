@@ -21,6 +21,7 @@ namespace camera_subscriber {
 
         public:
 
+
             /**
             * @brief Constructor for ROS2ImageSubscriber
             *
@@ -36,6 +37,7 @@ namespace camera_subscriber {
                 const std::string& node_name = "ros2_image_subscriber"
             );
 
+
             /**
             * @brief Destructor for ROS2ImageSubscriber
             * 
@@ -43,7 +45,9 @@ namespace camera_subscriber {
             */
             ~ROS2ImageSubscriber() override = default;
 
+
             // FRAME HANDLINGS
+      
             
             /**
             * @brief Get latest frame with corresponding frame metadata
@@ -54,6 +58,7 @@ namespace camera_subscriber {
             * Returns empty cv::Mat if no frames have been received yet.
             */
             cv::Mat get_latest_frame();
+
 
             /**
             * @brief Get latest frame with frame metadata, via timestamp and frame index
@@ -69,12 +74,14 @@ namespace camera_subscriber {
                 double &timestamp_sec
             );
 
+
             /**
             * @brief Check if any frames are currently in the queue
             * 
             * @return true if frames are available, false otherwise
             */
             bool has_frames() const;
+
 
             /**
             * @brief Get current queue size (number of buffered frames)
@@ -83,12 +90,14 @@ namespace camera_subscriber {
             */
             size_t get_queue_size() const;
 
+
             /**
             * @brief Get the maximum queue size
             * 
             * @return Maximum allowed frames in buffer
             */
             size_t get_max_queue_size() const;
+
 
             /**
             * @brief Reset the frame buffer (clear all queued frames)
@@ -97,7 +106,9 @@ namespace camera_subscriber {
             */
             void clear_frame_buffer();
 
+
             // STATISTICS
+
 
             /**
             * @brief Get statistics about subscription
@@ -115,14 +126,18 @@ namespace camera_subscriber {
                 std::string node_name;
             };
 
+
             SubscriptionStats get_stats() const;
+
 
             /**
             * @brief Reset statistics counters
             */
             void reset_stats();
 
+
         private:
+
 
             /**
             * @brief Internal callback function invoked when a new ROS2 image message arrives
@@ -133,6 +148,7 @@ namespace camera_subscriber {
             void image_callback(
                 const sensor_msgs::msg::Image::SharedPtr msg
             );
+
 
             /**
             * @brief Thread-safe conversion from ROS2 Image message to cv::Mat
@@ -147,13 +163,16 @@ namespace camera_subscriber {
                 const sensor_msgs::msg::Image::SharedPtr &msg
             );
 
+
             // ROS2 subscription
             rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_subscription_;
+
 
             // Frame buffer with thread safety
             mutable std::mutex frame_mutex_;
             std::queue<cv::Mat> frame_queue_;
             size_t max_queue_size_;
+
 
             // Frame metadata for synchronization
             struct FrameMetadata {
@@ -162,6 +181,7 @@ namespace camera_subscriber {
             };
             std::queue<FrameMetadata> metadata_queue_;
 
+            
             // Statistics tracking
             mutable std::mutex stats_mutex_;
             SubscriptionStats stats_;
