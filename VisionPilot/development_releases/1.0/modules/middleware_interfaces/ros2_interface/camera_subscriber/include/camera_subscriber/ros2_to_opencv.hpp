@@ -36,6 +36,13 @@ namespace camera_subscriber {
                 const std::string& node_name = "ros2_image_subscriber"
             );
 
+            /**
+            * @brief Destructor for ROS2ImageSubscriber
+            * 
+            * Cleans up ROS2 subscriptions and resources when the node is destroyed.
+            */
+            ~ROS2ImageSubscriber() override = default;
+
         private:
 
     };
