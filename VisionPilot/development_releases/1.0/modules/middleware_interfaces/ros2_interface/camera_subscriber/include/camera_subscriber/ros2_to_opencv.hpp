@@ -43,6 +43,8 @@ namespace camera_subscriber {
             */
             ~ROS2ImageSubscriber() override = default;
 
+            // FRAME HANDLINGS
+            
             /**
             * @brief Get latest frame with corresponding frame metadata
             *
@@ -94,6 +96,31 @@ namespace camera_subscriber {
             * Useful for resetting state or handling error conditions
             */
             void clear_frame_buffer();
+
+            // STATISTICS
+
+            /**
+            * @brief Get statistics about subscription
+            * 
+            * @return A struct containing:
+            *         - frames_received: total frames received from ROS2
+            *         - frames_dropped: frames dropped when queue was full
+            *         - conversion_errors: failed ROS2 => OpenCV conversions
+            */
+            struct SubscriptionStats {
+                uint64_t frames_received = 0;
+                uint64_t frames_dropped = 0;
+                uint64_t conversion_errors = 0;
+                std::string last_encoding;
+                std::string node_name;
+            };
+
+            SubscriptionStats get_stats() const;
+
+            /**
+            * @brief Reset statistics counters
+            */
+            void reset_stats();
 
         private:
 
