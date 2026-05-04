@@ -132,6 +132,23 @@ namespace camera_subscriber {
     };
 
 
-    
+    cv::Mat ROS2ImageSubscriber::get_latest_frame() 
+    {
+
+        std::lock_guard<std::mutex> lock(frame_mutex_);
+
+        // Return empty Mat if no frames available
+        if (frame_queue_.empty()) {
+            return cv::Mat();
+        }
+
+        // Fetch latest frame and corresponding metadata
+        cv::Mat latest_frame = frame_queue_.front();
+        frame_queue_.pop();
+        metadata_queue_.pop();
+
+        return latest_frame;
+
+    };
 
 }; // namespace camera_subscriber
