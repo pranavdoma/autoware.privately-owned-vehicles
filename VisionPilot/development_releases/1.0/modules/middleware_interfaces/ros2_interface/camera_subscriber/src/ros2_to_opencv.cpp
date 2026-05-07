@@ -9,14 +9,14 @@ namespace camera_subscriber {
         const std::string &node_name
     ) : (
         rclcpp::Node(node_name),
-        max_queue_size_(queue_size)
+        max_queue_size(queue_size)
     ) {
         
         RCLCPP_INFO(get_logger(), "Initializing ROS2 Image Subscriber");
         RCLCPP_INFO(get_logger(), "  Topic: %s", topic_name.c_str());
         RCLCPP_INFO(get_logger(), "  Queue Size: %zu", queue_size);
 
-        stats_.node_name = node_name;
+        stats.node_name = node_name;
 
         // Create subscription to the image topic
         // Using rclcpp::QoS profile for best effort delivery (suitable for camera streams)
@@ -52,8 +52,8 @@ namespace camera_subscriber {
         };
         {
             std::lock_guard<std::mutex> lock(stats_mutex);
-            stats_.frames_received++;
-            stats_.last_encoding = msg->encoding;
+            stats.frames_received++;
+            stats.last_encoding = msg->encoding;
         };
 
         // Convert ROS2 msg => OpenCV img
@@ -61,7 +61,7 @@ namespace camera_subscriber {
 
         if (cv_image.empty()) {
             std::lock_guard<std::mutex> lock(stats_mutex);
-            stats_.conversion_errors++;
+            stats.conversion_errors++;
             RCLCPP_WARN(
                 get_logger(), 
                 "Failed to convert ROS2 image to OpenCV (encoding: %s)",
@@ -81,7 +81,7 @@ namespace camera_subscriber {
                 metadata_queue_.pop();
                 
                 std::lock_guard<std::mutex> stats_lock(stats_mutex);
-                stats_.frames_dropped++;
+                stats.frames_dropped++;
             }
 
             // Declare that stream starts
@@ -192,15 +192,15 @@ namespace camera_subscriber {
 
     ROS2ImageSubscriber::SubscriptionStats ROS2ImageSubscriber::get_stats() const {
         std::lock_guard<std::mutex> lock(stats_mutex);
-        return stats_;
+        return stats;
     }
 
     void ROS2ImageSubscriber::reset_stats() {
 
         std::lock_guard<std::mutex> lock(stats_mutex);
-        stats_.frames_received = 0;
-        stats_.frames_dropped = 0;
-        stats_.conversion_errors = 0;
+        stats.frames_received = 0;
+        stats.frames_dropped = 0;
+        stats.conversion_errors = 0;
         RCLCPP_INFO(get_logger(), "Statistics reset");
 
     };
