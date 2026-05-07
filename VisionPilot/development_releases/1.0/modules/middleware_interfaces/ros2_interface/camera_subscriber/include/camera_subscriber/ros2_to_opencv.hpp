@@ -154,6 +154,16 @@ namespace camera_subscriber {
 
 
             /**
+            * @struct FrameMetadata
+            * @brief Metadata associated with each frame
+            */
+            struct FrameMetadata {
+                uint32_t sequence = 0;
+                double timestamp = 0.0;
+            };
+
+            
+            /**
             * @brief Internal callback function invoked when a new ROS2 image message arrives
             * 
             * Handles thread-safe conversion from sensor_msgs::msg::Image to cv::Mat
