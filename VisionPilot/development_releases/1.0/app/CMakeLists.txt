@@ -8,7 +8,4 @@ target_link_libraries(VisionPilot
         models
         visualization
         rclcpp::rclcpp
-        sensor_msgs::sensor_msgs
-        OpenCV::OpenCV
-        cv_bridge::cv_bridge
 )
