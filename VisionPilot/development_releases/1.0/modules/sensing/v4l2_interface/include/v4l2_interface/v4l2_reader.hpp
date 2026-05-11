@@ -1,5 +1,5 @@
-#ifndef VISIONPILOT_V4L2_READER_HPP
-#define VISIONPILOT_V4L2_READER_HPP
+#ifndef VISIONPILOT_V4L2_TO_OPENCV_HPP
+#define VISIONPILOT_V4L2_TO_OPENCV_HPP
 
 #include <opencv2/opencv.hpp>
 #include <cstdint>
@@ -121,8 +121,61 @@ namespace v4l2_interface {
         */
         void reset_stats();
 
-    }
 
-}
+    private:
 
-#endif //VISIONPILOT_V4L2_READER_HPP
+        
+        /**
+        * @brief Internal method to convert V4L2 raw frame to cv::Mat
+        * 
+        * Currently handles direct frame from VideoCapture.
+        * Can be extended for additional codec/format handling.
+        * 
+        * @param frame frame captured from VideoCapture
+        *
+        * @return cv::Mat : processed frame, or empty Mat if conversion failed
+        */
+        cv::Mat process_v4l2_frame(const cv::Mat& frame);
+
+
+        // OpenCV VideoCapture with V4L2 backend
+        cv::VideoCapture camera_capture;
+
+
+        // Single latest-frame slot with thread safety
+        mutable std::mutex frame_mutex;
+        cv::Mat latest_frame;
+        bool has_latest_frame = false;
+
+
+        // Flag for started stream
+        bool is_stream_started = false;
+
+
+        // Device configuration
+        std::string device_path;
+        uint32_t target_fps;
+
+
+        // Display rate throttling
+        mutable std::mutex display_time_mutex;
+        std::chrono::steady_clock::time_point last_display_time;
+        uint32_t display_frame_period_ms;
+
+
+        // Statistics tracking
+        mutable std::mutex stats_mutex;
+        CaptureStats stats;
+
+
+        // Logging helper
+        void log_info(const std::string& message) const;
+        void log_warning(const std::string& message) const;
+        void log_error(const std::string& message) const;
+        
+
+    };
+
+};  // namespace v4l2_interface
+
+#endif //VISIONPILOT_V4L2_TO_OPENCV_HPP
