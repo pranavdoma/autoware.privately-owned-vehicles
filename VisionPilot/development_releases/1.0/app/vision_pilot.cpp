@@ -108,7 +108,7 @@ int main(int argc, char** argv) {
 
             visualization::close_windows();
 
-        // ==================================== WTF IS THIS MODE ====================================
+        // ==================================== INVALID MODE INPUT ====================================
 
         } else {
             std::cout << "Invalid mode. Use 0 for ROS2 or 1 for V4L2.\n";
