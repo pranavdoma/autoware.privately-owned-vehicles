@@ -11,7 +11,7 @@ To easily try out the model on your own images and videos, please follow the ste
 
 ### Performance Results
 
-AutoSteer 2.0 network is trained on combined dataset from three distinct datasets [TUSimple](https://www.kaggle.com/datasets/manideep1108/tusimple), [OpenLane](https://github.com/OpenDriveLab/OpenLane) and [CurveLanes](https://github.com/SoulmateB/CurveLanes). The ataset is prepared with 90:10 ratio for train:val split, and we achieve a mAP@50 score of 0.9691 and a mAP score of 0.9546 on validation data.
+AutoSteer 2.0 network is trained on combined dataset from three distinct datasets [TUSimple](https://www.kaggle.com/datasets/manideep1108/tusimple), [OpenLane](https://github.com/OpenDriveLab/OpenLane) and [CurveLanes](https://github.com/SoulmateB/CurveLanes). The ataset is prepared with 90:10 ratio for train:val split, and we achieve a **mAP@50 score of 0.969** and a **mAP score of 0.955** on validation data. We also provide the INT8 quantized version of the AutoSteer 2.0 model which achieves a **mAP 0.952** and a **mAP@50 score of 0.966** on validation data.
 
 ## Model variants
 
@@ -20,7 +20,8 @@ AutoSteer 2.0 processess camera frames in a 2:1 aspect ratio with size 1024px by
 **AutoSteer 2.0 model weights - 2:1 aspect ratio, 1024px by 512px input image**
 
 ### [Link to Download Pytorch Model Weights *.pth](https://drive.google.com/file/d/1-wfPyu7HId7YDSh_T_DkB3Ma1zPc7Fu_/view?usp=drive_link)
-### [Link to Download ONNX FP32 Weights *.onnx](https://drive.google.com/file/d/1Rb05CScAfvl0OPRJz8S83Q4BWRG1pEKH/view?usp=drive_link)
+### [Link to Download ONNX FP32 Weights *.onnx](https://drive.google.com/file/d/1u89PujOd89M-l6t_Cvub3BaQsDFKofuY/view?usp=sharing)
+### [Link to Download ONNX INT8 Weights *.onnx](https://drive.google.com/file/d/1AsqQojp5gLdAGC8CPzA8e00Emx-oYylK/view?usp=sharing)
 
 
 **AutoSteer model weights  - 2:1 aspect ratio, 640px by 320px input image**
