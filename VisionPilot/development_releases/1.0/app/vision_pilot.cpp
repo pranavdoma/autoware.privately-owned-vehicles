@@ -1,3 +1,5 @@
+#include "vision_pilot_config.hpp"
+
 #include <camera_subscriber/ros2_to_opencv.hpp>
 #include <v4l2_interface/v4l2_reader.hpp>
 #include <visualization/visualization.hpp>
@@ -19,19 +21,26 @@
 #include <thread>
 #include <vector>
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Config
-// ─────────────────────────────────────────────────────────────────────────────
+namespace {
 
-struct Config {
-    // Model file paths
-    std::string autodrive_model = "models/autodrive.onnx";
-    std::string autosteer_model = "models/autosteer.onnx";
-    std::string autospeed_model = "models/autospeed.onnx";
+// First argv token that is not a config flag (expected: capture mode 0 or 1).
+int index_of_mode_arg(int argc, char** argv)
+{
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "--config" || arg == "-c") {
+            ++i;
+            continue;
+        }
+        if (arg.rfind("--config=", 0) == 0) {
+            continue;
+        }
+        return i;
+    }
+    return -1;
+}
 
-    // ORT engine — set provider/precision at startup
-    engine::EngineConfig engine;
-};
+}  // namespace
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Per-frame result bundle
@@ -67,7 +76,7 @@ public:
     static constexpr int NET_W    = 1024;
     static constexpr int CHW_SIZE = 3 * NET_H * NET_W;  // 1 572 864 floats
 
-    InferencePipeline(engine::OnnxEngine& ort_engine, const Config& cfg)
+    InferencePipeline(engine::OnnxEngine& ort_engine, const VisionPilotConfig& cfg)
         : auto_drive_(ort_engine, cfg.autodrive_model)
         , auto_steer_(ort_engine, cfg.autosteer_model)
         , auto_speed_(ort_engine, cfg.autospeed_model)
@@ -219,34 +228,51 @@ static cv::Mat spatial_preprocess(const cv::Mat& raw)
 
 int main(int argc, char** argv)
 {
-    // ── Usage ────────────────────────────────────────────────────────────────
-    // argv[1] : mode   0 = ROS2  |  1 = V4L2
-    // argv[2] : ROS2 topic  /  V4L2 device path
-    // argv[3] : (V4L2 only) target FPS
-
-    if (argc < 2) {
-        std::cout << "Usage: " << argv[0] << " [mode] [args...]\n"
+    const int mode_idx = index_of_mode_arg(argc, argv);
+    if (mode_idx < 0 || mode_idx >= argc) {
+        std::cout << "Usage: " << argv[0] << " [--config path] <mode> [args...]\n"
+                  << "  Config (first match wins):\n"
+                  << "    --config / -c <path>  |  $VISIONPILOT_CONFIG\n"
+                  << "    ./config/vision_pilot.conf  |  ./vision_pilot.conf\n"
+                  << "  Copy and edit: config/vision_pilot.conf.example\n"
                   << "  mode 0 (ROS2): [topic]           default: /camera/image\n"
                   << "  mode 1 (V4L2): [device] [fps]   default: /dev/video0  10\n";
         return 1;
     }
 
-    // ── Engine + pipeline setup ──────────────────────────────────────────────
-    Config cfg;
-    // TODO: load cfg from a config file; hardcoded defaults for now.
-    cfg.engine.provider = "cpu";
+    const std::string config_path = resolve_vision_pilot_config_path(argc, argv);
+    if (config_path.empty()) {
+        std::cerr << "[VisionPilot] No config file found.\n"
+                  << "  cp config/vision_pilot.conf.example config/vision_pilot.conf\n"
+                  << "  Or: export VISIONPILOT_CONFIG=/path/to/vision_pilot.conf\n";
+        return 1;
+    }
+
+    VisionPilotConfig cfg;
+    try {
+        cfg = load_vision_pilot_config(config_path);
+    } catch (const std::exception& e) {
+        std::cerr << "[VisionPilot] Config error: " << e.what() << "\n";
+        return 1;
+    }
+
+    std::cout << "[VisionPilot] Config: " << config_path << "\n"
+              << "  autodrive: " << cfg.autodrive_model << "\n"
+              << "  autosteer: " << cfg.autosteer_model << "\n"
+              << "  autospeed: " << cfg.autospeed_model << "\n"
+              << "  provider:  " << cfg.engine.provider << "\n";
 
     engine::OnnxEngine ort_engine(cfg.engine);
     InferencePipeline  pipeline(ort_engine, cfg);
 
-    const int mode = std::stoi(argv[1]);
+    const int mode = std::stoi(argv[mode_idx]);
 
     // ════════════════════════════════════════════════════════════════════════
     // ROS2 MODE
     // ════════════════════════════════════════════════════════════════════════
     if (mode == 0) {
 
-        const std::string topic = (argc > 2) ? argv[2] : "/camera/image";
+        const std::string topic = (mode_idx + 1 < argc) ? argv[mode_idx + 1] : "/camera/image";
         std::cout << "[VisionPilot] ROS2 mode | topic: " << topic << "\n";
 
         camera_subscriber::ROS2ImageSubscriber ros2_sub(topic);
@@ -287,8 +313,9 @@ int main(int argc, char** argv)
     // ════════════════════════════════════════════════════════════════════════
     } else if (mode == 1) {
 
-        const std::string device_path = (argc > 2) ? argv[2] : "/dev/video0";
-        const uint32_t    target_fps  = (argc > 3) ? static_cast<uint32_t>(std::stoi(argv[3])) : 10;
+        const std::string device_path = (mode_idx + 1 < argc) ? argv[mode_idx + 1] : "/dev/video0";
+        const uint32_t    target_fps  = (mode_idx + 2 < argc)
+            ? static_cast<uint32_t>(std::stoi(argv[mode_idx + 2])) : 10;
 
         std::cout << "[VisionPilot] V4L2 mode | device: " << device_path
                   << "  fps: " << target_fps << "\n";
