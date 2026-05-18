@@ -206,4 +206,84 @@ namespace visualization {
 
     };
 
+
+    // Websocket handler for closing connection to clean up client state
+    void on_websocket_closed(
+        SoupWebsocketConnection *connection,
+        gpointer user_data
+    ) {
+
+        auto *impl = static_cast<WebRTCStreamer::Impl*>(user_data);
+        std::lock_guard<std::mutex> lock(impl->signal_mutex);
+
+        if (impl->client_connection == connection) {
+            g_object_unref(impl->client_connection);
+            impl->client_connection = nullptr;
+        }
+
+    };
+
+
+    // Websocket handler for remote candidate
+    void handle_remote_candidate(
+        WebRTCStreamer::Impl *impl,
+        int sdp_mline_index,
+        const std::string& candidate
+    ) {
+
+        g_signal_emit_by_name(
+            impl->webrtc,
+            "add-ice-candidate",
+            static_cast<guint>(sdp_mline_index),
+            candidate.c_str()
+        );
+
+    };
+
+
+    // Websocket handler for incoming messages (SDP offers and ICE candidates)
+    void on_websocket_message(
+        SoupWebsocketConnection *connection,
+        gint type,
+        GBytes *message,
+        gpointer user_data
+    ) {
+
+        (void)connection;
+        (void)type;
+
+        auto *impl = static_cast<WebRTCStreamer::Impl*>(user_data);
+        gsize size = 0;
+        const gchar *data = static_cast<const gchar *>(g_bytes_get_data(message, &size));
+        
+        // Handle empty messages gracefully
+        if (data == nullptr || size == 0) {
+            return;
+        };
+
+        JsonParser *parser = json_parser_new();
+        GError *error = nullptr;
+        
+        // Handle JSON parsing errors gracefully
+        if (!json_parser_load_from_data(parser, data, static_cast<gsize>(size), &error)) {
+            if (error != nullptr) {
+                g_error_free(error);
+            }
+            g_object_unref(parser);
+            return;
+        };
+
+        JsonNode *root = json_parser_get_root(parser);
+        JsonObject *object = json_node_get_object(root);
+        
+        // Handle missing object or type field gracefully
+        if (object == nullptr || !json_object_has_member(object, "type")) {
+            g_object_unref(parser);
+            return;
+        };
+
+        
+
+    };
+
 }
