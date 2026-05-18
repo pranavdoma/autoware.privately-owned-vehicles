@@ -122,6 +122,7 @@ namespace visualization {
     };  // namespace
 
 
+    // Implementation of WebRTCStreamer class methods
     struct WebRTCStreamer::Impl {
 
         // Implementation details for WebRTC streaming (e.g., GStreamer pipeline, signaling, etc.)
@@ -175,6 +176,33 @@ namespace visualization {
         bool caps_configured = false;
         int configured_width = 0;
         int configured_height = 0;
+
+    };
+
+
+    // HTTP handler for root path to serve browser page with WebRTC client
+    void root_http_handler(
+        SoupServer *server,
+        SoupMessage *msg,
+        const char *path,
+        GHashTable *query,
+        SoupClientContext *client,
+        gpointer user_data
+    ) {
+
+        (void)server;
+        (void)path;
+        (void)query;
+        (void)user_data;
+
+        // Server a simple HTML page with JS to link WS and display video stream via WebRTC
+        soup_message_set_response(
+            msg,
+            "text/html", 
+            SOUP_MEMORY_STATIC,
+            kBrowserHtml,
+            std::strlen(kBrowserHtml)
+        );
 
     };
 
