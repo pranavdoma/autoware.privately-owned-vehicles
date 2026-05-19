@@ -141,3 +141,63 @@ visualization/
     └── visualization_to_webrtc.cpp     (WebRTC implementation)
 
 ```
+
+## III. Build
+
+### 1. Prerequisites
+
+- `ROS2 Humble` (tested on Ubuntu 22.04)
+    - `source /opt/ros/humble/setup.bash`
+- `GStreamer` development libraries:
+    - `libgstreamer1.0-dev`
+    - `libgstreamer-plugins-base1.0-dev`
+    - `libgstreamer-plugins-bad1.0-dev`
+- `libsoup 2.4` (HTTP/WebSocket server):
+    - `libsoup2.4-dev`
+- `JSON-GLib` (JSON signaling message handling):
+    - `libjson-glib-dev`
+- `OpenCV`:
+  - `libopencv-dev`
+- `Standard build tools`:
+  - `build-essential`, `cmake` (≥3.22.1), `pkg-config`
+
+Install all at once:
+
+```bash
+
+sudo apt update
+sudo apt install -y \
+  build-essential cmake pkg-config \
+  libopencv-dev \
+  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+  libgstreamer-plugins-bad1.0-dev \
+  libsoup2.4-dev libjson-glib-dev
+
+```
+
+### 2. Steps
+
+```bash
+# 1. Navigate to workspace root
+cd /path/to/VisionPilot/development_releases/1.0
+
+# 2. Source ROS2
+source /opt/ros/humble/setup.bash
+
+# 3. Build (from workspace root; CMake will configure all modules)
+mkdir -p build && cd build
+cmake .. -DONNXRUNTIME_ROOT=$your_ONNXRUNTIME_path
+make -j$(nproc)
+
+```
+
+### 3. Expected Output
+
+```bash
+[ 83%] Built target visualization
+[ 89%] Building CXX object app/CMakeFiles/VisionPilot.dir/vision_pilot.cpp.o
+[ 97%] Linking CXX executable ../VisionPilot
+[100%] Built target VisionPilot
+```
+
+Binary location: `build/VisionPilot`
