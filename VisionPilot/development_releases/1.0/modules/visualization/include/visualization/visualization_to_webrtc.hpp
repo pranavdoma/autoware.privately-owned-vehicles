@@ -43,9 +43,8 @@ namespace visualization {
             *
             * @param config Config options for WebRTC connection and streaming behavior.
             */
-            WebRTCStreamer(
-                Config config = Config()
-            );
+            WebRTCStreamer();
+            explicit WebRTCStreamer(Config config);
 
 
             /**

@@ -14,6 +14,11 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <thread>
+#include <mutex>
+#include <vector>
+#include <atomic>
+#include <cstdint>
 
 
 namespace visualization {
@@ -200,7 +205,7 @@ namespace visualization {
         bool start();
         bool stop();
         bool push_frame(const cv::Mat& frame);
-        bool has_clients() const;
+        bool has_client() const;
         void queue_signal(const std::string& signal);
         void flush_pending_signals();
         void queue_remote_candidate(
@@ -302,6 +307,37 @@ namespace visualization {
             static_cast<guint>(sdp_mline_index),
             candidate.c_str()
         );
+
+    };
+
+
+    // Websocket handler for remote description (SDP answer)
+    void handle_remote_description(
+        WebRTCStreamer::Impl *impl, 
+        const std::string & sdp_text
+    ) {
+
+        // Parse SDP text into GstSDPMessage
+        GstSDPMessage *sdp = nullptr;
+        if (
+            (gst_sdp_message_new_from_text(sdp_text.c_str(), &sdp) != GST_SDP_OK) || 
+            (sdp == nullptr)
+        ) {
+            return;
+        }
+
+        // Set remote description on webrtcbin element
+        GstWebRTCSessionDescription *answer = gst_webrtc_session_description_new(GST_WEBRTC_SDP_TYPE_ANSWER, sdp);
+        g_signal_emit_by_name(
+            impl->webrtc, 
+            "set-remote-description", 
+            answer, 
+            nullptr
+        );
+        gst_webrtc_session_description_free(answer);
+
+        impl->remote_description_ready.store(true, std::memory_order_release);
+        impl->flush_pending_remote_candidates();
 
     };
 
@@ -455,7 +491,7 @@ namespace visualization {
         }
 
         g_signal_emit_by_name(
-            impl->webrtc_, 
+            impl->webrtc, 
             "set-local-description", 
             offer, 
             nullptr
@@ -489,7 +525,7 @@ namespace visualization {
         );
 
         g_signal_emit_by_name(
-            impl->webrtc_, 
+            impl->webrtc, 
             "create-offer", 
             nullptr, 
             promise
@@ -524,7 +560,7 @@ namespace visualization {
     {
         
         // =========== 1. Init GStreamer (thread-safe)
-        initialize_gstreamer_once();
+        init_gstreamer_once();
 
         // =========== 2. Init SoupServer for signaling
 
@@ -607,20 +643,20 @@ namespace visualization {
 
         // d. Get references to appsrc and webrtcbin elements and handle errors gracefully
         appsrc = gst_bin_get_by_name(GST_BIN(pipeline), "source");
-        webrtc_ = gst_bin_get_by_name(GST_BIN(pipeline), "webrtc");
-        g_printerr("[WebRTCStreamer] pipeline created, appsrc=%p webrtc=%p\n", appsrc, webrtc_);
+        webrtc = gst_bin_get_by_name(GST_BIN(pipeline), "webrtc");
+        g_printerr("[WebRTCStreamer] pipeline created, appsrc=%p webrtc=%p\n", appsrc, webrtc);
 
         if (
             (appsrc == nullptr) || 
-            (webrtc_ == nullptr)
+            (webrtc == nullptr)
         ) {
             stop();
             return false;
         }
 
         g_object_set(G_OBJECT(appsrc), "block", TRUE, nullptr);
-        g_signal_connect(webrtc_, "on-negotiation-needed", G_CALLBACK(on_negotiation_needed), this);
-        g_signal_connect(webrtc_, "on-ice-candidate", G_CALLBACK(on_ice_candidate), this);
+        g_signal_connect(webrtc, "on-negotiation-needed", G_CALLBACK(on_negotiation_needed), this);
+        g_signal_connect(webrtc, "on-ice-candidate", G_CALLBACK(on_ice_candidate), this);
 
         // =========== 4. Set pipeline to PLAYING state and handle errors gracefully
 
@@ -640,7 +676,7 @@ namespace visualization {
 
 
     // Stop streaming, clean up resources, and shut down server
-    void WebRTCStreamer::Impl::stop()
+    bool WebRTCStreamer::Impl::stop()
     {
         
         // Stop streaming loop, prevent new frames from being pushed
@@ -672,9 +708,9 @@ namespace visualization {
             appsrc = nullptr;
         }
 
-        if (webrtc_ != nullptr) {
-            gst_object_unref(webrtc_);
-            webrtc_ = nullptr;
+        if (webrtc != nullptr) {
+            gst_object_unref(webrtc);
+            webrtc = nullptr;
         }
 
         if (pipeline != nullptr) {
@@ -692,6 +728,8 @@ namespace visualization {
             g_main_loop_unref(main_loop);
             main_loop = nullptr;
         }
+
+        return true;
 
     };
 
@@ -900,7 +938,7 @@ namespace visualization {
 
     // WebRTCStreamer constructor and destructor and aux. funcs
 
-    WebRTCStreamer::WebRTCStreamer(Config config) : impl_(std::make_unique<Impl>(std::move(config))) {}
+    WebRTCStreamer::WebRTCStreamer(Config config) : impl(std::make_unique<Impl>(std::move(config))) {}
 
     WebRTCStreamer::WebRTCStreamer() : WebRTCStreamer(Config()) {}
 
@@ -914,16 +952,18 @@ namespace visualization {
     bool WebRTCStreamer::start()
     {
         
-        return impl_ != nullptr && impl_->start();
+        return impl != nullptr && impl->start();
 
     }
 
-    void WebRTCStreamer::stop()
+    bool WebRTCStreamer::stop()
     {
         
-        if (impl_ != nullptr) {
-            impl_->stop();
+        if (impl != nullptr) {
+            return impl->stop();
         }
+
+        return true;
 
     };
 
@@ -931,35 +971,35 @@ namespace visualization {
         const cv::Mat & frame
     ) {
         
-        return impl_ != nullptr && impl_->push_frame(frame);
+        return impl != nullptr && impl->push_frame(frame);
 
     };
 
     bool WebRTCStreamer::is_running() const
     {
         
-        return impl_ != nullptr && impl_->running.load(std::memory_order_acquire);
+        return impl != nullptr && impl->running.load(std::memory_order_acquire);
 
     };
 
     bool WebRTCStreamer::has_client() const
     {
         
-        return impl_ != nullptr && impl_->has_client();
+        return impl != nullptr && impl->has_client();
 
     };
 
     std::string WebRTCStreamer::browser_url() const
     {
         
-        if (impl_ == nullptr) {
+        if (impl == nullptr) {
             return {};
         }
 
         return (
             std::string{"http://"} + \
-            impl_->config.host + ":" + \
-            std::to_string(impl_->config.port) + \
+            impl->config.host + ":" + \
+            std::to_string(impl->config.port) + \
             "/"
         );
 

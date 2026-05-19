@@ -18,6 +18,8 @@ add_library(visualization
         src/visualization_to_webrtc.cpp
 )
 
+target_compile_definitions(visualization PRIVATE GST_USE_UNSTABLE_API=1)
+
 target_include_directories(visualization
         PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
