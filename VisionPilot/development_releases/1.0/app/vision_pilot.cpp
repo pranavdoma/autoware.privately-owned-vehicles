@@ -5,6 +5,7 @@
 #include <visualization/visualization.hpp>
 
 #include <engine/onnx_engine.hpp>
+#include <fusion/longitudinal_fusion.hpp>
 #include <models/auto_drive.hpp>
 #include <models/auto_steer.hpp>
 #include <models/auto_speed.hpp>
@@ -109,9 +110,10 @@ struct LatencyStats {
 // ─────────────────────────────────────────────────────────────────────────────
 
 struct FrameOutputs {
-    visionpilot::models::AutoDriveOutput auto_drive;
-    visionpilot::models::AutoSteerOutput auto_steer;
-    visionpilot::models::AutoSpeedOutput auto_speed;
+    visionpilot::models::AutoDriveOutput  auto_drive;
+    visionpilot::models::AutoSteerOutput  auto_steer;
+    visionpilot::models::AutoSpeedOutput  auto_speed;
+    visionpilot::fusion::CIPOFusionEstimate cipo_fusion;  // particle-filter fused CIPO estimate
     uint64_t     frame_id = 0;
     FrameLatency latency;
 };
@@ -233,11 +235,24 @@ public:
         auto [res_speed, ms_speed] = f_speed.get();
         const double pipeline_ms = Ms(Clock::now() - t_dispatch).count();
 
+        // ── 5. Longitudinal fusion (particle filter) ──────────────────
+        // Converts AutoDrive dist_normalized → metres using the model's stated D_MAX.
+        // Tracker input is left invalid until ObjectFinder is ported to 1.0.
+        static constexpr float D_MAX_M = 150.f;
+
+        visionpilot::fusion::DistanceMeasurement ad_meas;
+        ad_meas.distance_m = D_MAX_M * (1.f - res_drive.dist_normalized);
+        ad_meas.stddev_m   = longitudinal_fusion_.config().autodrive_noise_m;
+        ad_meas.valid      = res_drive.valid;
+
+        const auto cipo_est = longitudinal_fusion_.update(ad_meas);
+
         FrameOutputs out;
-        out.auto_drive       = res_drive;
-        out.auto_steer       = res_steer;
-        out.auto_speed       = res_speed;
-        out.frame_id         = frame_count_;
+        out.auto_drive   = res_drive;
+        out.auto_steer   = res_steer;
+        out.auto_speed   = res_speed;
+        out.cipo_fusion  = cipo_est;
+        out.frame_id     = frame_count_;
         out.latency = { preprocess_ms, ms_drive, ms_steer, ms_speed, pipeline_ms };
         if (record_latency) {
             latency_stats_.update(out.latency);
@@ -251,6 +266,7 @@ public:
         frames_.clear();
         frame_count_  = 0;
         latency_stats_.reset();
+        longitudinal_fusion_.reset();
     }
 
     const LatencyStats& latency_stats() const { return latency_stats_; }
@@ -309,9 +325,11 @@ private:
     visionpilot::models::AutoSteer auto_steer_;
     visionpilot::models::AutoSpeed auto_speed_;
 
+    visionpilot::fusion::LongitudinalFusion longitudinal_fusion_;  // CIPO particle filter
+
     CircularFrameBuffer<2> frames_;
     uint64_t               frame_count_ = 0;
-    LatencyStats latency_stats_;
+    LatencyStats           latency_stats_;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -356,6 +374,12 @@ static void print_inference_summary(const FrameOutputs& out)
            s.valid, s.xp[0], s.h_vector[0]);
     printf("  AutoSpeed  valid=%d  detections=%zu\n",
            sp.valid, sp.detections.size());
+    if (out.cipo_fusion.valid) {
+        printf("  CIPOFusion valid=1  dist=%.2f m  vel=%.2f m/s  "
+               "(stddev: d=%.2f m  v=%.2f m/s)\n",
+               out.cipo_fusion.distance_m, out.cipo_fusion.velocity_ms,
+               out.cipo_fusion.distance_stddev_m, out.cipo_fusion.velocity_stddev_ms);
+    }
     print_latency_detail(out.latency, "Steady-state");
 
     if (!d.valid || !s.valid || !sp.valid) {
@@ -442,6 +466,12 @@ static std::vector<std::string> make_inference_overlay(
         lines.push_back(
             "AutoSpeed  dets=" + std::to_string(result.auto_speed.detections.size()) +
             "  [" + fmt(lt.autospeed_ms) + " ms]");
+    }
+    if (result.cipo_fusion.valid) {
+        lines.push_back(
+            "CIPO fused  d=" + fmt(result.cipo_fusion.distance_m, 1) + " m"
+            "  v=" + fmt(result.cipo_fusion.velocity_ms, 2) + " m/s"
+            "  \xb1" + fmt(result.cipo_fusion.distance_stddev_m, 1) + " m");
     }
     const double wall_ms = lt.pipeline_ms;
     lines.push_back(
