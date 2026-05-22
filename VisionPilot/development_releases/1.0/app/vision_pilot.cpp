@@ -268,14 +268,11 @@ static std::vector<std::string> build_overlay(const FrameOutputs& r, const std::
         L.push_back("AutoSpeed   dets=" + std::to_string(r.auto_speed.detections.size())
                     + "  [" + fmtd(lt.autospeed_ms) + " ms]");
 
-    // ── Tracker raw estimate (ObjectFinder + Kalman) ─────────────────────────
-    if (r.cipo.tracker_found)
-        L.push_back("Tracker     d=" + fmtd(r.cipo.tracker_dist_m, 1) + " m [raw]"
-                    + "  v=" + fmtd(r.cipo.tracker_vel_ms, 2) + " m/s"
-                    + "  id=" + std::to_string(r.cipo.tracker_id)
-                    + (r.cipo.cut_in_detected ? "  [CUT-IN]" : ""));
+    // ── AutoSpeed homography distance (raw, no tracking state) ──────────────
+    if (r.cipo.homo_found)
+        L.push_back("Homo        d=" + fmtd(r.cipo.homo_dist_m, 1) + " m [raw]");
     else
-        L.push_back("Tracker     (no CIPO)");
+        L.push_back("Homo        (no CIPO)");
 
     // ── Particle-filter fused estimate ───────────────────────────────────────
     if (r.cipo.valid)
