@@ -10,6 +10,7 @@
 
 #include <engine/onnx_engine.hpp>
 #include <fusion/longitudinal_fusion.hpp>
+#include <fusion/lateral_fusion.hpp>
 #include <models/auto_drive.hpp>
 #include <models/auto_steer.hpp>
 #include <models/auto_speed.hpp>
@@ -82,12 +83,13 @@ struct LatencyStats {
 // Per-frame outputs
 // ─────────────────────────────────────────────────────────────────────────────
 struct FrameOutputs {
-    vm::AutoDriveOutput    auto_drive;
-    vm::AutoSteerOutput    auto_steer;
-    vm::AutoSpeedOutput    auto_speed;
-    vf::CIPOFusionEstimate cipo;    // tracker + particle-filter fused estimate
-    uint64_t               frame_id = 0;
-    FrameLatency           latency;
+    vm::AutoDriveOutput       auto_drive;
+    vm::AutoSteerOutput       auto_steer;
+    vm::AutoSpeedOutput       auto_speed;
+    vf::CIPOFusionEstimate    cipo;    // longitudinal particle-filter fused estimate
+    vf::LateralFusionEstimate lateral; // CTE/Yaw + curvature particle-filter estimate
+    uint64_t                  frame_id = 0;
+    FrameLatency              latency;
 };
 
 
@@ -111,6 +113,11 @@ public:
         fc.homography_path = cfg.homography_path;
         fc.debug           = cfg.fusion_debug;
         fusion_ = vf::LongitudinalFusion{fc};
+
+        vf::LateralFusion::Config lfc;
+        lfc.homography_path = cfg.homography_path;
+        lfc.debug           = cfg.fusion_debug;
+        lateral_fusion_ = vf::LateralFusion{lfc};
     }
 
     // preprocessed : NET_W × NET_H BGR for model inference
@@ -157,14 +164,18 @@ public:
         auto [res_speed, ms_speed] = f_speed.get();
         const double ms_wall = Ms(Clock::now() - t_wall).count();
 
-        // ── Fusion: ObjectFinder + particle filter ────────────────────────────
+        // ── Longitudinal fusion: CIPO distance + velocity ─────────────────────
         const auto cipo = fusion_.update(res_drive, res_speed, preprocessed);
+
+        // ── Lateral fusion: CTE / yaw / curvature ────────────────────────────
+        const auto lateral = lateral_fusion_.update(res_steer, res_drive);
 
         FrameOutputs out;
         out.auto_drive = res_drive;
         out.auto_steer = res_steer;
         out.auto_speed = res_speed;
         out.cipo       = cipo;
+        out.lateral    = lateral;
         out.frame_id   = frame_count_;
         out.latency    = {ms_pre, ms_drive, ms_steer, ms_speed, ms_wall};
         stats_.update(out.latency);
@@ -176,6 +187,7 @@ public:
         frame_count_ = 0;
         stats_.reset();
         fusion_.reset();
+        lateral_fusion_.reset();
     }
 
     const LatencyStats& latency() const { return stats_; }
@@ -211,6 +223,7 @@ private:
     vm::AutoSteer  auto_steer_;
     vm::AutoSpeed  auto_speed_;
     vf::LongitudinalFusion fusion_;
+    vf::LateralFusion      lateral_fusion_;
     CircularFrameBuffer<2> frames_;
     uint64_t               frame_count_ = 0;
     LatencyStats           stats_;
@@ -288,11 +301,28 @@ static std::vector<std::string> build_overlay(const FrameOutputs& r, const std::
     else
         L.push_back("CIPO raw    (none)");
 
-    // ── Particle-filter fused estimate ───────────────────────────────────────
+    // ── Particle-filter fused longitudinal estimate ───────────────────────────
     if (r.cipo.valid)
-        L.push_back("Fused       d=" + fmtd(r.cipo.distance_m, 1) + " m"
+        L.push_back("Fused CIPO  d=" + fmtd(r.cipo.distance_m, 1) + " m"
                     + "  v=" + fmtd(r.cipo.velocity_ms, 2) + " m/s"
                     + "  ±" + fmtd(r.cipo.distance_stddev_m, 1) + " m");
+
+    // ── Lateral fusion: CTE / Yaw / Curvature ────────────────────────────────
+    const auto& lat = r.lateral;
+    if (lat.path_valid)
+        L.push_back("Path raw    CTE=" + fmtd(lat.raw_cte_m, 2) + " m"
+                    + "  yaw=" + fmtd(lat.raw_yaw_rad, 3) + " rad"
+                    + "  κ=" + fmtd(lat.raw_path_curvature, 4)
+                    + "  (" + std::to_string(lat.path_inliers) + "/" +
+                               std::to_string(lat.path_points) + " pts)");
+    else
+        L.push_back("Path raw    (no fit, " + std::to_string(lat.path_points) + " pts)");
+
+    if (lat.valid)
+        L.push_back("Fused Lat   CTE=" + fmtd(lat.cte_m, 2) + " m"
+                    + "  yaw=" + fmtd(lat.yaw_rad, 3) + " rad"
+                    + "  κ=" + fmtd(lat.curvature, 4)
+                    + "  AD-κ=" + fmtd(lat.raw_ad_curvature, 4));
 
     return L;
 }
