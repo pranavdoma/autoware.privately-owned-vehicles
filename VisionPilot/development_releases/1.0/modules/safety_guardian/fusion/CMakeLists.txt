@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22.1)
 
-find_package(OpenCV REQUIRED)
+find_package(OpenCV REQUIRED COMPONENTS core)
 
 add_library(fusion
     src/longitudinal_fusion.cpp
@@ -15,7 +15,7 @@ target_include_directories(fusion
 target_link_libraries(fusion
     PUBLIC
         models          # AutoDriveOutput, AutoSpeedOutput, Detection in public API
-        ${OpenCV_LIBS}  # cv::Mat in public header
+        opencv_core     # cv::Mat in public header
     PRIVATE
         logging         # VP_INFO macros used in longitudinal_fusion.cpp
 )

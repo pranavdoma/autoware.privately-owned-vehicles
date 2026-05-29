@@ -25,7 +25,8 @@ target_include_directories(v4l2_interface
 # Link OpenCV libraries
 target_link_libraries(v4l2_interface
         PUBLIC
-        ${OpenCV_LIBS}
+        opencv_core
+        opencv_videoio
 )
 
 # Link threading support for std::mutex

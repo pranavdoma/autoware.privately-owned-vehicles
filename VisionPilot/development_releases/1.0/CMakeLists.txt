@@ -42,5 +42,7 @@ add_subdirectory(modules/sensing/v4l2_interface)
 
 add_subdirectory(modules/visualization)
 
+add_subdirectory(modules/debug)
+
 # App
 add_subdirectory(app)
