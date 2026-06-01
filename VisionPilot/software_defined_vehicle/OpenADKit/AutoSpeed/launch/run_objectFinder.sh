@@ -7,7 +7,7 @@ export GST_DEBUG=1
 # ===== Required Parameters =====
 VIDEO_PATH="/autoware/test/traffic-driving.mp4"
 MODEL_PATH="/autoware/model-weights/autospeed.onnx"
-PROVIDER="cpu"       # Execution provider: 'cpu' or 'tensorrt'
+PROVIDER="tensorrt"       # Execution provider: 'cpu' or 'tensorrt'
 PRECISION="fp32"     # Precision: 'fp32' or 'fp16' (for TensorRT)
 HOMOGRAPHY_YAML="/autoware/VisionPilot/Middleware_Recipes/Standalone/AutoSpeed/homography.yaml"
 NUM_THREADS="4" # 0 means auto, number of inference threads, 1 thread for capture, 1 thread for display will be used aside from this
@@ -46,10 +46,6 @@ echo "Model: $MODEL_PATH"
 echo "Provider: $PROVIDER"
 echo "Precision: $PRECISION"
 echo "Homography: $HOMOGRAPHY_YAML"
-if [ "$PROVIDER" == "tensorrt" ]; then
-    echo "Device ID: $DEVICE_ID"
-    echo "Cache Dir: $CACHE_DIR"
-fi
 echo "========================================"
 echo "Visualization: $ENABLE_VIZ"
 echo "Save Video: $SAVE_VIDEO"
@@ -72,4 +68,9 @@ if [ -z "$ONNXRUNTIME_ROOT" ]; then
     exit 1
 fi
 
+if [ "$PROVIDER" == "tensorrt" ] && [ -z "$(ls -A $CACHE_DIR/*.engine 2>/dev/null)" ]; then
+    echo "[warm-up] Building TensorRT engine cache (first run only, ~30s)..."
+    timeout 120 /autoware/autospeed_infer_stream "$VIDEO_PATH" "$MODEL_PATH" "$PROVIDER" "$PRECISION" "$HOMOGRAPHY_YAML" "$DEVICE_ID" "$CACHE_DIR" "false" "false" "false" "false" "$OUTPUT_VIDEO" "$NUM_THREADS" > /dev/null 2>&1 || true
+    echo "[warm-up] Done. Starting inference..."
+fi
 /autoware/autospeed_infer_stream "$VIDEO_PATH" "$MODEL_PATH" "$PROVIDER" "$PRECISION" "$HOMOGRAPHY_YAML" "$DEVICE_ID" "$CACHE_DIR" "$REALTIME" "$MEASURE_LATENCY" "$ENABLE_VIZ" "$SAVE_VIDEO" "$OUTPUT_VIDEO" "$NUM_THREADS"
