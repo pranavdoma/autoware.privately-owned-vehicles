@@ -104,11 +104,14 @@ LateralFusionEstimate LateralFusion::update(
             path = fit_ransac(pts);
     }
 
-    est.path_valid         = path.valid;
-    est.raw_cte_m          = path.cte_m;
-    est.raw_yaw_rad        = path.yaw_rad;
-    est.raw_path_curvature = path.curvature;
-    est.path_inliers       = path.inliers;
+        est.path_valid         = path.valid;
+        est.raw_cte_m          = path.cte_m;
+        est.raw_yaw_rad        = path.yaw_rad;
+        est.raw_path_curvature = path.curvature;
+        est.path_inliers       = path.inliers;
+        est.path_a             = path.a;
+        est.path_b             = path.b;
+        est.path_c             = path.c;
 
     // ── Step 3: AutoDrive curvature ───────────────────────────────────────────
     float ad_curv = 0.f;
@@ -284,7 +287,7 @@ LateralFusion::fit_ransac(const std::vector<WorldPt>& pts) const
             do { ic = pick(const_cast<std::mt19937&>(rng_)); } while (ic == ia || ic == ib);
 
             const std::vector<WorldPt> sample = {pts[ia], pts[ib], pts[ic]};
-            const PathParams model = fit_quadratic(sample);
+            const PathParams model = fit_quadratic(sample, cfg_.curv_sample_count);
             if (!model.valid) continue;
 
             // Count inliers
@@ -303,7 +306,7 @@ LateralFusion::fit_ransac(const std::vector<WorldPt>& pts) const
 
     // Final refit on inlier set
     if (static_cast<int>(best_inliers_pts.size()) >= 3) {
-        PathParams final_fit = fit_quadratic(best_inliers_pts);
+        PathParams final_fit = fit_quadratic(best_inliers_pts, cfg_.curv_sample_count);
         final_fit.inliers    = static_cast<int>(best_inliers_pts.size());
         if (final_fit.inliers < cfg_.ransac_min_inliers) return {};
         if (std::abs(final_fit.cte_m) > cfg_.max_abs_cte_m) return {};
@@ -312,9 +315,45 @@ LateralFusion::fit_ransac(const std::vector<WorldPt>& pts) const
     return {};
 }
 
+// κ(x) for y = a·x² + b·x + c  →  κ = 2a / (1 + (2ax + b)²)^(3/2)
+float LateralFusion::curvature_at_x(float a, float b, float x)
+{
+    const float dydx = 2.f * a * x + b;
+    const float denom = std::pow(1.f + dydx * dydx, 1.5f);
+    if (denom < 1e-6f) return 0.f;
+    return (2.f * a) / denom;
+}
+
+float LateralFusion::sample_path_curvature(const std::vector<WorldPt>& pts,
+                                           float a, float b, int n_samples)
+{
+    if (n_samples < 1) return curvature_at_x(a, b, 0.f);
+
+    float x_lo = pts.empty() ? 0.f : pts[0].x;
+    float x_hi = x_lo;
+    for (const auto& p : pts) {
+        x_lo = std::min(x_lo, p.x);
+        x_hi = std::max(x_hi, p.x);
+    }
+    x_lo = std::max(0.f, x_lo);
+    if (x_hi <= x_lo + 0.5f)
+        return curvature_at_x(a, b, x_lo);
+
+    std::vector<float> kappas;
+    kappas.reserve(static_cast<std::size_t>(n_samples));
+    for (int i = 0; i < n_samples; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(n_samples - 1);
+        const float x = x_lo + t * (x_hi - x_lo);
+        kappas.push_back(curvature_at_x(a, b, x));
+    }
+    const auto mid = kappas.begin() + kappas.size() / 2;
+    std::nth_element(kappas.begin(), mid, kappas.end());
+    return *mid;
+}
+
 // Least-squares quadratic fit: y = a·x² + b·x + c
 LateralFusion::PathParams
-LateralFusion::fit_quadratic(const std::vector<WorldPt>& pts)
+LateralFusion::fit_quadratic(const std::vector<WorldPt>& pts, int curv_samples)
 {
     const int n = static_cast<int>(pts.size());
     if (n < 3) return {};
@@ -338,15 +377,9 @@ LateralFusion::fit_quadratic(const std::vector<WorldPt>& pts)
     p.b = sol.at<float>(1);
     p.c = sol.at<float>(2);
 
-    // CTE = lateral offset at x=0
     p.cte_m   = p.c;
-    // Yaw = path slope angle at x=0
     p.yaw_rad = std::atan(p.b);
-    // Curvature of y=f(x): κ = |y''| / (1+y'^2)^1.5 = |2a| / (1+b^2)^1.5
-    const float denom = std::pow(1.f + p.b * p.b, 1.5f);
-    p.curvature = (denom > 1e-6f) ? std::abs(2.f * p.a) / denom : 0.f;
-    // Preserve sign: positive curvature = turning left
-    if (p.a < 0.f) p.curvature = -p.curvature;
+    p.curvature = sample_path_curvature(pts, p.a, p.b, curv_samples);
     return p;
 }
 
