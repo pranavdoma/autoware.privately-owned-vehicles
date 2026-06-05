@@ -1,6 +1,8 @@
 #ifndef VISIONPILOT_CAMERA_INTERFACE_HPP
 #define VISIONPILOT_CAMERA_INTERFACE_HPP
+#include <string>
 #include <tuple>
+#include <vector>
 #include <opencv2/core/mat.hpp>
 
 namespace camera_interface {
@@ -26,6 +28,12 @@ namespace camera_interface {
         virtual bool is_device_open() const = 0;
         virtual std::tuple<bool, cv::Mat> get_latest_frame() = 0;
         virtual std::vector<std::string> get_overlay() const = 0;
+
+        // Live sources never finish; video returns true after EOF when not looping.
+        virtual bool is_finished() const { return false; }
+        // One-shot after a video loop rewind (caller may reset pipeline).
+        virtual bool take_rewind() { return false; }
+        virtual std::string source_label() const { return {}; }
     };
 }
 
