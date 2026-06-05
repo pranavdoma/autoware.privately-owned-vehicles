@@ -12,8 +12,8 @@ namespace visionpilot::models {
 
 // ─── Output ───────────────────────────────────────────────────────────────────
 // Both tensors are (2, 64) in the Python model, flattened row-major here:
-//   xp[0..63]       = row 0
-//   xp[64..127]     = row 1
+//   xp[row*64 + i]  = lateral x at fixed image row i (normalized [0,1], ×1024 for px)
+//   NOT (u,v) pairs — v comes from linspace(0, H-1, 64) in the visualizer.
 struct AutoSteerOutput {
     std::array<float, 128> xp{};        // (2, 64) ego-path waypoints
     std::array<float, 128> h_vector{};  // (2, 64) homography vectors

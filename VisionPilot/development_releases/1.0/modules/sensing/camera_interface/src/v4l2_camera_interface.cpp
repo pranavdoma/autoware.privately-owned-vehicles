@@ -198,6 +198,11 @@ namespace camera_interface {
         return overlay;
     }
 
+    std::string V4L2CameraInterface::source_label() const
+    {
+        return device_path;
+    }
+
 
     void V4L2CameraInterface::reset_stats() {
         std::lock_guard<std::mutex> lock(stats_mutex);

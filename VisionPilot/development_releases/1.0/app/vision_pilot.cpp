@@ -1,91 +1,97 @@
+// VisionPilot — preprocess → inference → fusion → display
+#include <config/vision_pilot_config.hpp>
+#include <debug/debug_draw.hpp>
+#include <engine/onnx_engine.hpp>
+#include <image_preprocessing/image_preprocessor.hpp>
+#include <logging/logger.hpp>
+#include <models/inference.hpp>
+#include <visualization/visualization.hpp>
+
+#include <camera_interface/frame_source.hpp>
+#ifdef ENABLE_WEBRTC
+#include <visualization/visualization_to_webrtc.hpp>
+#endif
+
 #include <chrono>
-#include <iostream>
-#include <unordered_map>
-#include <string>
-#include <vector>
+#include <memory>
 #include <thread>
 
-#include <camera_interface/v4l2_camera_interface.hpp>
+namespace ve = visionpilot::engine;
+namespace vm = visionpilot::models;
+namespace vd = visionpilot::debug;
 
-#ifdef ENABLE_ROS2_INTERFACE
-#include <camera_subscriber/ros2_to_opencv.hpp>
-#endif
-
-#include <visualization/visualization.hpp>
-#include <visualization/visualization_to_webrtc.hpp>
-
-int main(int argc, char **argv) {
-    std::unique_ptr<camera_interface::CameraInterface> camera_interface;
-
-#ifdef ENABLE_ROS2_INTERFACE
-    camera_interface = std::make_unique<camera_interface::ROS2ImageSubscriber>("/camera/image");
-#else
-    camera_interface = std::make_unique<camera_interface::V4L2CameraInterface>("/dev/video0", 10);
-#endif
-
-    if (!camera_interface->is_device_open()) {
-        std::cerr << "Failed to open camera interface!" << std::endl;
+int main(int argc, char** argv)
+{
+    // ── 1. Config ─────────────────────────────────────────────────────────────
+    const std::string cfg_path = resolve_vision_pilot_config_path(argc, argv);
+    if (cfg_path.empty()) {
+        VP_ERROR("No config — cp config/vision_pilot.conf.example config/vision_pilot.conf");
         return 1;
-    };
+    }
 
+    VisionPilotConfig cfg;
+    try { cfg = load_vision_pilot_config(cfg_path); }
+    catch (const std::exception& e) { VP_ERROR("Config: %s", e.what()); return 1; }
 
-    std::unordered_map<std::string, std::string> args_info;
+    // ── 2. Pipeline (preprocess + ONNX + inference/fusion) ────────────────────
+    ImagePreprocessor preprocessor;
+    ve::OnnxEngine engine(cfg.engine_cfg);
+    vm::InferencePipeline pipeline(engine, {
+        cfg.autodrive_model, cfg.autosteer_model, cfg.autospeed_model,
+        cfg.homography_path, cfg.fusion_debug,
+    });
 
+    vd::init_wheel_assets(cfg.wheel_dir);
+    vd::init_homography(cfg.homography_path);
 
-    // =================================== WEBRTC INIT ===================================
-    bool start_webrtc = false;
-    uint16_t webrtc_port = 8080;
+    // ── 3. Display output ─────────────────────────────────────────────────────
+    bool show_window = true;
+#ifdef ENABLE_WEBRTC
+    std::unique_ptr<visualization::WebRTCStreamer> webrtc;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--webrtc") show_window = false;
+        if (std::string(argv[i]) == "--webrtc-port" && i + 1 < argc) {
+            webrtc = std::make_unique<visualization::WebRTCStreamer>();
+            if (!webrtc->init(static_cast<uint16_t>(std::stoi(argv[++i])))) return 1;
+        }
+    }
+#endif
 
-    if (argc > 4) {
-        start_webrtc = (std::stoi(argv[4]) != 0);
-    };
-    if (argc > 5) {
-        webrtc_port = static_cast<uint16_t>(std::stoi(argv[5]));
-    };
+    // ── 4. Frame source (video / V4L2 / ROS2) ───────────────────────────────
+    auto source = camera_interface::open_frame_source(cfg.source);
+    if (!source || !source->is_device_open()) {
+        VP_ERROR("Cannot open frame source");
+        return 1;
+    }
 
-    std::unique_ptr<visualization::WebRTCStreamer> webrtc_streamer;
-    // Disable local preview if WebRTC is enabled to avoid X11/xcb threading issues
-    const bool show_local_preview = !start_webrtc;
+    const cv::Size net_size(vm::AutoDrive::NET_W, vm::AutoDrive::NET_H);
+    cv::Mat frame, warped, resized;
 
-    if (start_webrtc) {
-        std::cout << "Starting WebRTC streamer on port: " << webrtc_port << "\n";
-
-        // Init WebRTC streamer instance (one-liner - Atanasko's request)
-        webrtc_streamer = std::make_unique<visualization::WebRTCStreamer>();
-
-        if (!webrtc_streamer->init(webrtc_port)) {
-            std::cerr << "Failed to start WebRTC streamer." << std::endl;
-            return 1;
+    // ── 5. Main loop ────────────────────────────────────────────────────────
+    while (!source->is_finished()) {
+        auto [ok, frame] = source->get_latest_frame();
+        if (!ok || frame.empty()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            continue;
+        }
+        if (source->take_rewind()) {
+            pipeline.reset();
         }
 
-        std::cout << "Local OpenCV preview is disabled while WebRTC is enabled.\n";
-    } else {
-        std::cout << "WebRTC streamer disabled.\n";
-    };
+        preprocessor.preprocess(frame, warped, resized, net_size);
 
-    //  MAIN LOOP
-    while (true) {
-        bool has_frame = false;
-        cv::Mat frame;
+        if (const auto r = pipeline.process(warped)) {
+            if (r->frame_id % 30 == 0) pipeline.latency().print();
+            vd::annotate_frame(warped, vd::debug_view_from(
+                *r, source->source_label(), cfg.wheel_dir, cfg.homography_path));
+        }
 
-        auto frame_result = camera_interface->get_latest_frame();
-        has_frame = std::get<0>(frame_result);
-        frame = std::get<1>(frame_result);
+        if (show_window) visualization::render_frame(warped, "VisionPilot", {});
+#ifdef ENABLE_WEBRTC
+        if (webrtc) webrtc->push_frame(warped);
+#endif
+    }
 
-        if (has_frame && !frame.empty()) {
-            std::vector<std::string> overlay = camera_interface->get_overlay();
-
-            // Render out frame ONLY WHEN not WebRTC streaming to avoid X11/xcb threading issues
-            if (show_local_preview) {
-                visualization::render_frame(frame, "VisionPilot", overlay);
-            }
-
-            // Push frame to WebRTC streamer if enabled
-            if (webrtc_streamer != nullptr) {
-                webrtc_streamer->push_frame(frame);
-            };
-        };
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(33));
-    };
+    visualization::close_windows();
+    return 0;
 }
