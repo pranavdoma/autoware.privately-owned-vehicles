@@ -101,7 +101,6 @@ namespace camera_interface {
         *         - device_path: V4L2 device being used
         */
         std::vector<std::string> get_overlay() const;
-        std::string source_label() const override;
 
         /**
         * @brief Reset statistics counters
