@@ -315,8 +315,8 @@ static void draw_autospeed_detections(cv::Mat& img,
 }
 
 // ─── AutoSteer ego path (video_visualization.py) ─────────────────────────────
-// xp/h_vector are (2, 64): row 0 and row 1 lateral samples at fixed image rows.
-// y = linspace(0, H-1, 64); u = xp[row,i] * W; mask with h_vector >= 0.5
+// xp/h_vector are (1, 64): lateral samples at fixed image rows.
+// y = linspace(0, H-1, 64); u = xp[i] * W; mask with h_vector >= 0.5
 
 // World (x=forward, y=lateral) → BEV inset pixels. Ego at bottom-centre, forward up.
 static cv::Point world_to_bev_px(float x_fwd, float y_lat,
@@ -423,20 +423,11 @@ static void draw_autosteer_ego_path(cv::Mat& img,
         y_pts[i] = (kPathPts <= 1) ? 0
                    : static_cast<int>(std::lround(static_cast<double>(i) * (H - 1) / (kPathPts - 1)));
 
-    // Centerline: midpoint of row 0 / row 1 at each fixed image row (matches lateral fusion)
     std::vector<cv::Point> poly;
     for (int i = 0; i < kPathPts; ++i) {
-        float u_sum = 0.f;
-        int   n     = 0;
-        for (int row = 0; row < 2; ++row) {
-            const int idx = row * kPathPts + i;
-            if (steer.h_vector[idx] < 0.5f) continue;
-            u_sum += steer.xp[idx];
-            ++n;
-        }
-        if (n == 0) continue;
+        if (steer.h_vector[i] < 0.5f) continue;
 
-        const int u = static_cast<int>((u_sum / static_cast<float>(n)) * static_cast<float>(W));
+        const int u = static_cast<int>(steer.xp[i] * static_cast<float>(W));
         const int v = y_pts[i];
         if (u < 0 || u >= W || v < 0 || v >= H) continue;
 
