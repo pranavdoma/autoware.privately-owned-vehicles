@@ -5,6 +5,7 @@
 #include <image_preprocessing/image_preprocessor.hpp>
 #include <logging/logger.hpp>
 #include <models/inference.hpp>
+#include <planning/planning.hpp>
 #include <visualization/visualization.hpp>
 
 #include <camera_interface/frame_source.hpp>
@@ -20,8 +21,7 @@ namespace ve = visionpilot::engine;
 namespace vm = visionpilot::models;
 namespace vd = visionpilot::debug;
 
-int main(int argc, char** argv)
-{
+int main(int argc, char **argv) {
     // ── 1. Config ─────────────────────────────────────────────────────────────
     const std::string cfg_path = resolve_vision_pilot_config_path(argc, argv);
     if (cfg_path.empty()) {
@@ -30,14 +30,18 @@ int main(int argc, char** argv)
     }
 
     VisionPilotConfig cfg;
-    try { cfg = load_vision_pilot_config(cfg_path); }
-    catch (const std::exception& e) { VP_ERROR("Config: %s", e.what()); return 1; }
+    try { cfg = load_vision_pilot_config(cfg_path); } catch (const std::exception &e) {
+        VP_ERROR("Config: %s", e.what());
+        return 1;
+    }
 
     // ── 2. Pipeline (preprocess + ONNX + inference/fusion) ────────────────────
     ImagePreprocessor preprocessor;
     ve::OnnxEngine engine(cfg.engine);
     // vm::InferencePipeline pipeline(engine, {cfg.inference.precision, cfg.fusion_debug,});
     vm::InferencePipeline pipeline(engine, cfg.inference);
+
+    Planner planner(cfg.speed_limit, cfg.Lf);
 
     vd::init_wheel_assets(cfg.wheel_dir);
     vd::init_homography();
@@ -80,7 +84,21 @@ int main(int argc, char** argv)
         if (const auto r = pipeline.process(warped)) {
             pipeline.latency().print();
             vd::annotate_frame(warped, vd::debug_view_from(
-                *r, label, cfg.wheel_dir));
+                                   *r, label, cfg.wheel_dir));
+
+            // Compute the plan
+            // double cte = r->lateral.cte_m;
+            // double epsi = r->lateral.yaw_rad;
+            // double kappa = r->lateral.curvature;
+            // double ego_v = speeds[frame_number++];
+            // double cipo_v = r->cipo.velocity_ms;
+            // double cipo_distance = r->cipo.distance_m;
+            // bool has_cipo = r->cipo.cipo_raw_found;
+            //
+            // // acceleration m/s, steering rad
+            // auto [acceleration, steering] = planner.compute_plan(cte, epsi, kappa, ego_v, has_cipo, ego_v + cipo_v,
+            //                                                      cipo_distance);
+            // Send commands
         }
 
         if (show_window) visualization::render_frame(warped, "VisionPilot", {});
