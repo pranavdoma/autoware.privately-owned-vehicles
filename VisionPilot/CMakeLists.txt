@@ -41,7 +41,7 @@ if(ENABLE_ROS2_INTERFACE)
     add_subdirectory(modules/middleware_interfaces/ros2_interface/camera_subscriber)
     add_subdirectory(modules/middleware_interfaces/ros2_interface/control_cmd_publisher)
     add_subdirectory(modules/middleware_interfaces/ros2_interface/vehicle_state_subscriber)
-    add_subdirectory(modules/middleware_interfaces/ros2_interface/visualization_publisher)
+    # visualization_publisher not yet migrated — skip until added
 endif()
 
 add_subdirectory(modules/engine)
