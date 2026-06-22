@@ -114,7 +114,7 @@ int main(int argc, char** argv)
     Planner planner(cfg.speed_limit, cfg.Lf);
     // ── 5. Main loop ────────────────────────────────────────────────────────
     int frame_number = 0;
-    std::vector<double> speeds = readSpeeds("/data/DEVELOPMENT/AUTONOMOUS/AUTOWARE/TEST/frame_speed.txt");
+    std::vector<double> speeds = readSpeeds("<PATH_TO_TEST_VEHICLE_SPEED>");
     while (true)
     {
         auto [ok, frame] = source->get_latest_frame();
