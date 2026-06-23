@@ -8,6 +8,7 @@ if (ENABLE_ROS2_INTERFACE)
     target_link_libraries(VisionPilot
             PRIVATE
             camera_subscriber
+            vehicle_ros2_interface
     )
 
     target_compile_definitions(VisionPilot PRIVATE ENABLE_ROS2_INTERFACE)
@@ -23,8 +24,9 @@ target_link_libraries(VisionPilot
     fusion           # LongitudinalFusion, LateralFusion
     planning         # Planning
     vp_debug         # annotate_frame, DebugView
-    can_interface
+    vehicle_interface
     camera_interface
+    vehicle_interface
     image_preprocessing
     visualization
 )

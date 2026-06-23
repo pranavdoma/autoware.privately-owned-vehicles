@@ -13,7 +13,7 @@ target_link_libraries(test_vision_pilot
         fusion           # LongitudinalFusion, LateralFusion
         planning
         vp_debug         # annotate_frame, DebugView
-        can_interface
+        vehicle_interface
         camera_interface
         image_preprocessing
         visualization
