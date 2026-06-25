@@ -66,6 +66,7 @@ int main(int argc, char** argv)
 
     vd::init_wheel_assets(cfg.wheel_dir);
     vd::init_homography();
+    visualization::init_production_assets();  // resolve assets/icons at start-up
 
     // ── 3. Display output ─────────────────────────────────────────────────────
     bool show_window = true;
@@ -110,10 +111,8 @@ int main(int argc, char** argv)
         if (const auto r = pipeline.process(warped))
         {
             pipeline.latency().print();
-            vd::annotate_frame(warped, vd::debug_view_from(
-                                   *r, label, cfg.wheel_dir));
 
-            // Compute the plan
+            // ── Plan ────────────────────────────────────────────────────────
             const double ego_v     = vehicle_interface->read();
             const double cte       = r->lateral.cte_m;
             const double epsi      = r->lateral.yaw_rad;
@@ -133,9 +132,40 @@ int main(int argc, char** argv)
             vehicle_interface->write(
                 plan.steering.empty() ? 0.0 : plan.steering[0],
                 plan.acceleration);
-        }
 
-        if (show_window) visualization::render_frame(warped, "VisionPilot", {});
+            // ── Production visualisation ─────────────────────────────────
+            if (show_window) {
+                visualization::ProductionView pv;
+                pv.ego_speed_ms = ego_v;
+                pv.acceleration = plan.acceleration;
+                for (const auto& w : plan.warnings)
+                    pv.warnings.push_back(static_cast<uint8_t>(w));
+                if (r->lateral.path_valid) {
+                    pv.path_a       = r->lateral.path_a;
+                    pv.path_b       = r->lateral.path_b;
+                    pv.path_c       = r->lateral.path_c;
+                    pv.path_x_min_m = r->lateral.path_x_min_m;
+                    pv.path_x_max_m = r->lateral.path_x_max_m;
+                    pv.path_valid   = true;
+                }
+                for (const auto& d : r->auto_speed.detections) {
+                    pv.detections.push_back({
+                        d.x1, d.y1, d.x2, d.y2, d.score, d.class_id});
+                }
+                pv.cipo = {
+                    r->cipo.valid,
+                    r->cipo.distance_m,
+                    r->cipo.velocity_ms,
+                    r->cipo.cipo_raw_found,
+                    r->cipo.cipo_raw_dist_m,
+                    r->cipo.cut_in_detected};
+
+                visualization::render_production_frame(warped, pv);
+            }
+        } else if (show_window) {
+            // No inference result yet — show raw warped frame
+            visualization::render_frame(warped, "VisionPilot", {});
+        }
 #ifdef ENABLE_WEBRTC
         if (webrtc) webrtc->push_frame(warped);
 #endif
