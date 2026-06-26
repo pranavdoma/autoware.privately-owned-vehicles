@@ -83,11 +83,47 @@ InferencePipeline::InferencePipeline(engine::OnnxEngine& engine, const Inference
     lat_fusion_ = fusion::LateralFusion{latc};
 }
 
-std::optional<InferenceFrameResult> InferencePipeline::process(const cv::Mat& warped)
+// V matrix — warped BEV 1024×512 → world.  Matches lateral/longitudinal fusion H_.
+// DO NOT MODIFY — must stay in sync with the hardcoded H_ in both fusion modules.
+static const cv::Matx33d kV(
+     0.00209514907, -0.000941721466, -9.24906396,
+     0.00662758637, -0.000352940531, -3.33396502,
+     0.000120077371, -0.00411343505,  1.0);
+
+void InferencePipeline::set_H_resized(const cv::Mat& C, cv::Size raw_size)
+{
+    // H_resized: resized_px → world
+    //   world = V × C × raw_px
+    //   raw_px = inv(T_resize) × resized_px   where T_resize scales raw to 1024×512
+    //   ⟹  H_resized = V × C × inv(T_resize)
+    cv::Mat C64;
+    C.convertTo(C64, CV_64F);
+
+    const double sx = 1024.0 / raw_size.width;
+    const double sy =  512.0 / raw_size.height;
+    // inv(T_resize) — maps 1024×512 px back to raw px
+    const cv::Matx33d T_inv(1.0/sx, 0,      0,
+                             0,      1.0/sy,  0,
+                             0,      0,       1);
+
+    const cv::Mat H_resized = cv::Mat(kV) * C64 * cv::Mat(T_inv);
+
+    H_resized_ = H_resized.clone();
+    cv::Mat H64_inv = H_resized.inv();   // MatExpr → cv::Mat
+    H64_inv.convertTo(H_world2resized_, CV_32F);
+    lat_fusion_.set_H(H_resized_);
+    long_fusion_.set_H(H_resized_);
+    VP_INFO("[Pipeline] H_resized set — raw=%dx%d  sx=%.4f sy=%.4f",
+            raw_size.width, raw_size.height, sx, sy);
+}
+
+std::optional<InferenceFrameResult> InferencePipeline::process(const cv::Mat& warped,
+                                                               const cv::Mat& resized)
 {
     using Clock = std::chrono::steady_clock;
     using Ms    = std::chrono::duration<double, std::milli>;
 
+    // Two-frame buffer is warped (for AutoDrive only)
     prev_frame_ = curr_frame_.empty() ? warped.clone() : curr_frame_;
     curr_frame_ = warped.clone();
     if (frame_buf_count_ < 1) frame_buf_count_ = 1;
@@ -96,11 +132,14 @@ std::optional<InferenceFrameResult> InferencePipeline::process(const cv::Mat& wa
     ++frame_count_;
     if (frame_buf_count_ < 2) return std::nullopt;
 
-    auto t0       = Clock::now();
+    // AutoSteer + AutoSpeed use resized if provided, else fall back to warped
+    const cv::Mat& as_input = (!resized.empty()) ? resized : warped;
+
+    auto t0          = Clock::now();
     auto prev_imn    = chw_imagenet(prev_frame_);
     auto curr_imn    = chw_imagenet(curr_frame_);
-    auto curr_01_as  = chw_01(curr_frame_);
-    auto curr_01_asp = curr_01_as;
+    auto curr_01_as  = chw_01(as_input);
+    auto curr_01_asp = curr_01_as;   // shared preprocessing (same image)
     const double ms_pre = Ms(Clock::now() - t0).count();
 
     auto t_wall = Clock::now();
