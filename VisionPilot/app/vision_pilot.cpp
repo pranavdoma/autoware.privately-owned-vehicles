@@ -103,7 +103,7 @@ int main(int argc, char** argv)
     const cv::Size net_size(vm::AutoDrive::NET_W, vm::AutoDrive::NET_H);
     cv::Mat frame, warped, resized;
     bool h_resized_set = false;
-    cv::Mat H = load_matrix("H_open_lane.yaml", "H");
+    cv::Mat H = load_matrix("H.yaml", "H");
     while (true)
     {
         auto [ok, frame] = camera_interface->get_latest_frame();

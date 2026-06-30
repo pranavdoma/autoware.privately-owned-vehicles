@@ -103,27 +103,27 @@ static const cv::Matx33d kV(
 
 void InferencePipeline::set_H_resized(const cv::Mat& H, cv::Size raw_size)
 {
-    // H_resized: resized_px → world
-    //   world = V × C × raw_px
-    //   raw_px = inv(T_resize) × resized_px   where T_resize scales raw to 1024×512
-    //   ⟹  H_resized = V × C × inv(T_resize)
+    // H_resized: resized_px → world  (AutoSteer / AutoSpeed path)
+    // Preprocessor: center-crop to 2:1, then resize to 1024×512.
+    //   raw_px = T × resized_px
+    //     u_raw = u_r · (crop_w / 1024)
+    //     v_raw = v_r · (crop_h / 512) + crop_top
+    //   world  = H × raw_px  ⟹  H_resized = H × T
     cv::Mat H64;
     H.convertTo(H64, CV_64F);
 
-    int input_image_w = raw_size.width;
-    int input_image_h = raw_size.height;
-    double crop_h = (input_image_h - input_image_w / 2) / 2;
+    const int input_image_w = raw_size.width;
+    const int input_image_h = raw_size.height;
+    const double crop_top   = (input_image_h - input_image_w / 2) / 2.0;
+    const double crop_w     = static_cast<double>(input_image_w);
+    const double crop_h     = static_cast<double>(input_image_h) - 2.0 * crop_top;
 
-    const double sx = 1024.0 / raw_size.width;
-    const double sy =  512.0 / raw_size.height;
-    // inv(T_resize) — maps 1024×512 px back to raw px
-    // const cv::Matx33d T_inv(1.0/sx, 0,      0,
-    //                          0,      1.0/sy,  0,
-    //                          0,      0,       1);
+    const double sx = crop_w / 1024.0;
+    const double sy = crop_h / 512.0;
 
-    const cv::Matx33d T(1.0, 0,    0,
-                        0,   1.0,  crop_h,
-                        0,   0,    1);
+    const cv::Matx33d T(sx, 0,        0,
+                        0,  sy,  crop_top,
+                        0,   0,        1);
 
     const cv::Mat H_resized = H64 * cv::Mat(T);
 
@@ -132,8 +132,8 @@ void InferencePipeline::set_H_resized(const cv::Mat& H, cv::Size raw_size)
     H64_inv.convertTo(H_world2resized_, CV_32F);
     lat_fusion_.set_H(H_resized_);
     long_fusion_.set_H(H_resized_);
-    VP_INFO("[Pipeline] H_resized set — raw=%dx%d  sx=%.4f sy=%.4f",
-            raw_size.width, raw_size.height, sx, sy);
+    VP_INFO("[Pipeline] H_resized set — raw=%dx%d  crop=%.0fx%.0f  sx=%.4f sy=%.4f  top=%.0f",
+            raw_size.width, raw_size.height, crop_w, crop_h, sx, sy, crop_top);
 }
 
 std::optional<InferenceFrameResult> InferencePipeline::process(const cv::Mat& warped,
