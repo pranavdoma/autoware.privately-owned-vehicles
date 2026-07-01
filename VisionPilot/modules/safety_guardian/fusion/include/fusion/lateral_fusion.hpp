@@ -81,14 +81,19 @@ public:
         float meas_noise_curv_ad     = 0.010f;  // AutoDrive curvature (scaled)
 
         // RANSAC polynomial fit
+        // thresh raised 0.20→0.25 m: AutoSteer waypoints spread more laterally
+        // in close-following / occlusion scenarios; 20cm was too tight.
+        // min_inliers lowered 20→15: requiring 70% consensus from ~28 pts was
+        // too strict when a lead vehicle scatters some waypoints. 54% is still
+        // majority agreement and keeps bad fits from passing.
         float ransac_thresh_m        = 0.20f;   // lateral inlier tolerance [m]
-        int   ransac_iters           = 50;
+        int   ransac_iters           = 80;      // more iterations → better coverage in occlusion
         int   ransac_min_pts         = 5;       // min projected points to attempt fit
 
         // curvature_raw × scale → physical κ [1/m] (CURV_SCALE = 0.21 in training).
         float ad_curvature_scale     = 0.21f;
-        int   ransac_min_inliers     = 20;      // reject path fit if fewer inliers
-        float max_abs_cte_m          = 1.2f;    // reject RANSAC fits extrapolating > 1.2m at ego
+        int   ransac_min_inliers     = 12;      // reject path fit if fewer inliers
+        float max_abs_cte_m          = 3.0f;    // reject RANSAC fits with |cte| > 3m (full lane width guard)
         float curv_x_min_m           = 3.f;     // κ sampled only at waypoint x ≥ this
         float curv_x_max_m           = 25.f;    // κ sampled only at waypoint x ≤ this
 
