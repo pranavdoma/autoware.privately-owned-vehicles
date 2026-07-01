@@ -66,11 +66,114 @@ We utilize a **Hybrid End-to-End AI Architecture** as the core of Vision Pilot i
 
 ### How to download and build Vision Pilot
 
-### Run Vision Pilot on test data and visualize outputs
+To get started with the project, download the source code from:
+```bash
+  git clone https://github.com/autowarefoundation/autoware_vision_pilot.git
+```
+Download ONNX Runtime from the GitHub [releases](https://github.com/microsoft/onnxruntime/releases) page.
+
+Build the project:
+
+```bash
+  cd VisionPilot
+```
+
+```bash
+  mkdir build && cd build
+```
+
+```bash
+  cmake -DONNXRUNTIME_ROOT=<ONNX_RUNTIME_ROOT_PATH> ../
+```
+
+or with ROS2 support 
+
+```bash
+  cmake -DONNXRUNTIME_ROOT=<ONNX_RUNTIME_ROOT_PATH> -DENABLE_ROS2_INTERFACE=ON ../
+```
+
+```bash
+  make
+```
+This will build the project and create VisionPilot executable inside the build directory.
+
+#### Run Vision Pilot on test data and visualize outputs
 
 **OpenLane Dataset:**
 
-**Zenseact ZOD Dataset:**
+To test Vision Pilot using open loop scenario testing, first download the sample data from the [Google Drive]() directory.
+
+This directory contains video composed of image data from sequences in the appropriate dataset and vehicle speed data 
+extracted from the dataset.
+
+Update VisionPilot config files `vision_pilot.conf` inside `config` directory and set: 
+
+```
+source.mode             = video
+```
+and `vision_pilot_test.conf` set:
+
+```
+source.input_video         = <INPUT_VIDEO_FILE_PATH>
+source.input_vehicle_speed = <INPUT_VEHICLE_SPEED_FILE_PATH>
+```
+to point to the appropriate video file path and vehicle speed file path.
+
+*Note*: When VisionPilot built from source, update config files before the build. 
+
+Run VisionPilot from inside `build` directory
+
+```
+./VisionPilot
+```
+
+### Install Vision Pilot from a prebuilt binary
+
+This method is recommended in case new system installation and cuda dependencies are not installed yet.
+
+Download [VisionPilot](https://github.com/autowarefoundation/autoware_vision_pilot.git) prebuilt binary.
+
+Install the .deb package
+
+```bash
+  sudo apt install ./VisionPilot-1.0-x86_64.deb
+```
+Reboot the system, cuda dependencies for VisionPilot installed.
+
+#### Run Vision Pilot on test data and visualize outputs
+
+**OpenLane Dataset:**
+
+To test Vision Pilot using open loop scenario testing, first download the sample data from the [Google Drive]() directory.
+
+This directory contains video composed of image data from sequences in the appropriate dataset and vehicle speed data 
+extracted from the dataset.
+
+Update VisionPilot config files `vision_pilot.conf` set: 
+
+```
+source.mode             = video
+```
+and `vision_pilot_test.conf` set:
+
+```
+source.input_video         = <INPUT_VIDEO_FILE_PATH>
+source.input_vehicle_speed = <INPUT_VEHICLE_SPEED_FILE_PATH>
+```
+to point to the appropriate video file path and vehicle speed file path.
+
+*Note*: When VisionPilot installed from prebuilt binary update the config files inside: 
+
+```
+/usr/share/visionpilot/config
+```
+directory.
+
+Run VisionPilot from the command line
+
+```
+VisionPilot
+```
 
 ### Coming Soon:
 
