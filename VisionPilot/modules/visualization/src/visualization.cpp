@@ -24,7 +24,8 @@ static constexpr int   kNetW     = 1024;
 static constexpr int   kNetH     = 512;
 static constexpr int   kPathPts  = 64;
 static constexpr float kDMax     = 150.f;
-static constexpr int   kIconPx   = 80;   // icon display size (px)
+static constexpr int   kIconPx   = 80;   // default icon display size (px)
+static constexpr int   kHudFont  = cv::FONT_HERSHEY_DUPLEX;
 
 // ─── Warped-pixel → world homography (copy of LongitudinalFusion H_) ──────────
 // Input:  pixel (u, v) in the 1024×512 warped BEV image
@@ -48,20 +49,24 @@ static cv::Mat g_icon_rld;       // right lane departure  (BGRA, kIconPx²)
 static cv::Mat g_icon_lld;       // left  lane departure  (BGRA, horizontally flipped)
 
 // ─── Helper: alpha-composite BGRA icon centred at (cx, cy) onto BGR base ──────
-static void paste_icon(cv::Mat& base, const cv::Mat& icon, int cx, int cy) {
+static void paste_icon(cv::Mat& base, const cv::Mat& icon, int cx, int cy, int px = 0) {
     if (icon.empty() || base.empty()) return;
 
-    const int x  = cx - icon.cols / 2;
-    const int y  = cy - icon.rows / 2;
+    cv::Mat draw_icon = icon;
+    if (px > 0 && (icon.cols != px || icon.rows != px))
+        cv::resize(icon, draw_icon, cv::Size(px, px), 0, 0, cv::INTER_AREA);
+
+    const int x  = cx - draw_icon.cols / 2;
+    const int y  = cy - draw_icon.rows / 2;
     const int x1 = std::max(x, 0);
     const int y1 = std::max(y, 0);
-    const int x2 = std::min(x + icon.cols, base.cols);
-    const int y2 = std::min(y + icon.rows, base.rows);
+    const int x2 = std::min(x + draw_icon.cols, base.cols);
+    const int y2 = std::min(y + draw_icon.rows, base.rows);
     if (x2 <= x1 || y2 <= y1) return;
 
     const cv::Rect src_rect(x1 - x, y1 - y, x2 - x1, y2 - y1);
     cv::Mat roi = base(cv::Rect(x1, y1, x2 - x1, y2 - y1));
-    cv::Mat src = icon(src_rect);
+    cv::Mat src = draw_icon(src_rect);
 
     if (src.channels() == 4) {
         std::vector<cv::Mat> ch;
@@ -108,23 +113,17 @@ static std::string resolve_icons_dir(const std::string& hint) {
     return {};
 }
 
-// ─── Helper: pick gradient color pair from acceleration ───────────────────────
-// Colors in BGR.  near = bottom of image (ego), far = vanishing point (horizon).
-static void gradient_colors(double acc,
-                             cv::Scalar& near_bgr, cv::Scalar& far_bgr) {
-    if (acc < -0.5) {
-        // Braking → greenish near, red far
-        near_bgr = cv::Scalar(50,  200, 60);
-        far_bgr  = cv::Scalar(0,   30,  220);
-    } else if (acc > 0.5) {
-        // Accelerating → blue gradient
-        near_bgr = cv::Scalar(220, 120, 0);
-        far_bgr  = cv::Scalar(255, 200, 0);
-    } else {
-        // Cruise → green near, blue far
-        near_bgr = cv::Scalar(50,  200, 60);
-        far_bgr  = cv::Scalar(210, 60,  0);
-    }
+// ─── Helper: pick solid corridor color from acceleration ──────────────────────
+// Color schema (BGR):
+//   acc < -5          hard brake  → (93, 0, 255)   rgb(255,0,93)
+//   -5 ≤ acc ≤ -3     moderate    → (0, 102, 255)   rgb(255,102,0)
+//   -3 < acc ≤ -1     light brake → (0, 213, 255)   rgb(255,213,0)
+//   acc > -1          cruise/accel→ (174, 255, 0)   rgb(0,255,174)
+static cv::Scalar path_color(double acc) {
+    if      (acc < -5.0) return cv::Scalar( 93,   0, 255);
+    else if (acc < -3.0) return cv::Scalar(  0, 102, 255);
+    else if (acc < -1.0) return cv::Scalar(  0, 213, 255);
+    else                 return cv::Scalar(174, 255,   0);
 }
 
 
@@ -197,36 +196,21 @@ static void draw_path_corridor(cv::Mat& img, const ProductionView& view) {
     const int n = static_cast<int>(lp.size());
     if (n < 2) return;
 
-    // ── Gradient fill: one trapezoid per segment, far→near ────────────────────
-    // i=0 is farthest (x = x_start, small pixel v = high in image)
-    // i=n−1 is nearest (x = x_end,  large pixel v = low in image)
-    cv::Scalar near_bgr, far_bgr;
-    gradient_colors(view.acceleration, near_bgr, far_bgr);
-
+    // ── Solid fill with single acceleration-derived color, semi-transparent ─────
+    const cv::Scalar color = path_color(view.acceleration);
     cv::Mat overlay = img.clone();
     const cv::Rect bounds(0, 0, img.cols, img.rows);
 
     for (int i = 0; i < n - 1; ++i) {
-        const float t = (n > 2) ? (static_cast<float>(i) + 0.5f) / (n - 1.f) : 0.5f;
-
-        // t=0 → i=0 → x=x_min (nearest, bottom of image) → near_bgr (green)
-        // t=1 → i=n-1 → x=x_max (farthest, horizon)    → far_bgr  (red/blue)
-        const cv::Scalar color(
-            near_bgr[0] * (1.f - t) + far_bgr[0] * t,
-            near_bgr[1] * (1.f - t) + far_bgr[1] * t,
-            near_bgr[2] * (1.f - t) + far_bgr[2] * t);
-
         const std::vector<cv::Point> quad = {lp[i], rp[i], rp[i + 1], lp[i + 1]};
-
         bool any_in = false;
         for (const auto& p : quad)
             if (bounds.contains(p)) { any_in = true; break; }
         if (!any_in) continue;
-
         cv::fillConvexPoly(overlay, quad, color, cv::LINE_AA);
     }
 
-    cv::addWeighted(overlay, 0.45, img, 0.55, 0.0, img);
+    cv::addWeighted(overlay, 0.35, img, 0.65, 0.0, img);
 }
 
 // ─── Draw: AutoSpeed bounding boxes + CIPO distance label ─────────────────────
@@ -322,6 +306,23 @@ static void draw_speed(cv::Mat& img, double speed_ms) {
     cv::addWeighted(overlay, 1.0, img, 0.5, 0, img);
 }
 
+// ─── Helper: production HUD text (Duplex + subtle shadow) ────────────────────
+static void draw_hud_text(cv::Mat& img, const std::string& text, cv::Point origin,
+                          double scale, cv::Scalar color, int thickness = 1) {
+    cv::putText(img, text, origin + cv::Point(1, 1), kHudFont, scale,
+                cv::Scalar(0, 0, 0), thickness + 1, cv::LINE_AA);
+    cv::putText(img, text, origin, kHudFont, scale, color, thickness, cv::LINE_AA);
+}
+
+static void draw_hud_text_centered(cv::Mat& img, const std::string& text, int cx,
+                                   int baseline_y, double scale, cv::Scalar color,
+                                   int thickness = 1) {
+    int bl = 0;
+    const cv::Size ts = cv::getTextSize(text, kHudFont, scale, thickness, &bl);
+    draw_hud_text(img, text, cv::Point(cx - ts.width / 2, baseline_y),
+                  scale, color, thickness);
+}
+
 // ─── Draw: alert overlays + icons ────────────────────────────────────────────
 static bool has_warning(const std::vector<uint8_t>& ws, uint8_t v) {
     for (auto w : ws) if (w == v) return true;
@@ -331,60 +332,154 @@ static bool has_warning(const std::vector<uint8_t>& ws, uint8_t v) {
 static void draw_alerts(cv::Mat& img, const ProductionView& view) {
     const int W  = img.cols;
     const int H  = img.rows;
-    const int sw = W * 28 / 100;  // side strip width for LDW
+    const int sw = W * 14 / 100;
 
-    // ── FCW=1, AEB=2, LLDW=3, RLDW=4 (mirror of Warning enum) ───────────────
     const bool fcw  = has_warning(view.warnings, 1);
     const bool aeb  = has_warning(view.warnings, 2);
     const bool lldw = has_warning(view.warnings, 3);
     const bool rldw = has_warning(view.warnings, 4);
 
-    // Lane departure strips ────────────────────────────────────────────────────
     static const cv::Scalar kOrange{0, 120, 255};
     static const cv::Scalar kWhite {255, 255, 255};
+    static constexpr double kAlertFont = 0.50;
 
-    if (lldw) {
-        fill_rect_alpha(img, cv::Rect(0, 0, sw, H), kOrange, 0.45);
-        paste_icon(img, g_icon_lld, sw / 2, H / 2 - 20);
-        cv::putText(img, "Left Lane",
-                    cv::Point(10, H / 2 + 28),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.55, kWhite, 2, cv::LINE_AA);
-        cv::putText(img, "Departure",
-                    cv::Point(10, H / 2 + 52),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.55, kWhite, 2, cv::LINE_AA);
-    }
-    if (rldw) {
-        fill_rect_alpha(img, cv::Rect(W - sw, 0, sw, H), kOrange, 0.45);
-        paste_icon(img, g_icon_rld, W - sw / 2, H / 2 - 20);
-        cv::putText(img, "Right Lane",
-                    cv::Point(W - sw + 8, H / 2 + 28),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.55, kWhite, 2, cv::LINE_AA);
-        cv::putText(img, "Departure",
-                    cv::Point(W - sw + 8, H / 2 + 52),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.55, kWhite, 2, cv::LINE_AA);
+    auto draw_side_alert = [&](bool left, const cv::Mat& icon,
+                               const char* line1, const char* line2) {
+        const int cx = left ? sw / 2 : W - sw / 2;
+        const int x0 = left ? 0 : W - sw;
+        fill_rect_alpha(img, cv::Rect(x0, 0, sw, H), kOrange, 0.45);
+
+        const int icon_px = std::min(52, sw - 20);
+        const int icon_cy = H * 36 / 100;
+        paste_icon(img, icon, cx, icon_cy, icon_px);
+
+        const int icon_bottom = icon_cy + icon_px / 2;
+        const int line1_y = icon_bottom + 22;
+        const int line2_y = line1_y + 20;
+        draw_hud_text_centered(img, line1, cx, line1_y, kAlertFont, kWhite);
+        draw_hud_text_centered(img, line2, cx, line2_y, kAlertFont, kWhite);
+    };
+
+    auto draw_bottom_alert = [&](const cv::Mat& icon, const char* label,
+                                 cv::Scalar bg, double bg_alpha, int strip_pct) {
+        const int bh = H * strip_pct / 100;
+        const int y0 = H - bh;
+        fill_rect_alpha(img, cv::Rect(0, y0, W, bh), bg, bg_alpha);
+
+        int bl = 0;
+        const cv::Size ts = cv::getTextSize(label, kHudFont, kAlertFont, 1, &bl);
+        const int text_baseline = H - std::max(10, bh / 10);
+        const int text_top = text_baseline - ts.height;
+
+        const int icon_px = std::min(46, std::max(28, (text_top - y0 - 14) * 2));
+        const int icon_cy = y0 + (text_top - y0) / 2;
+
+        paste_icon(img, icon, W / 2, icon_cy, icon_px);
+        draw_hud_text_centered(img, label, W / 2, text_baseline, kAlertFont, kWhite);
+    };
+
+    if (lldw)
+        draw_side_alert(true,  g_icon_lld, "Left Lane",  "Departure");
+    if (rldw)
+        draw_side_alert(false, g_icon_rld, "Right Lane", "Departure");
+
+    if (aeb)
+        draw_bottom_alert(g_icon_brake, "Emergency Braking",
+                          cv::Scalar(0, 0, 180), 0.50, 22);
+    else if (fcw)
+        draw_bottom_alert(g_icon_collision, "Collision Alert",
+                          cv::Scalar(0, 130, 230), 0.45, 18);
+}
+
+// ─── Draw: top-to-bottom gradient black vignette (Comma AI style) ────────────
+// Darkens the top 45% of the frame from 60% black opacity at the very top
+// down to fully transparent at the fade boundary.  Vectorized: converts the
+// affected rows to float32, scales each row's brightness by (1 - alpha), then
+// converts back — no per-pixel loop, uses OpenCV SIMD internally.
+static void draw_top_vignette(cv::Mat& img) {
+    static constexpr float kMaxAlpha = 0.60f;
+    const int fade_h = img.rows * 45 / 100;
+
+    // Work in float [0,1] so the scale doesn't clip
+    cv::Mat img_f;
+    img.convertTo(img_f, CV_32FC3, 1.0 / 255.0);
+
+    for (int y = 0; y < fade_h; ++y) {
+        const float scale = 1.f - kMaxAlpha * (1.f - static_cast<float>(y) / fade_h);
+        img_f.row(y) *= scale;
     }
 
-    // Collision / braking overlay (bottom strip) ──────────────────────────────
-    if (aeb) {
-        const int bh = H * 38 / 100;
-        fill_rect_alpha(img, cv::Rect(0, H - bh, W, bh), cv::Scalar(0, 0, 180), 0.50);
-        paste_icon(img, g_icon_brake, W / 2, H - bh / 2 - 10);
-        int bl = 0;
-        cv::Size ts = cv::getTextSize(
-            "Emergency Braking", cv::FONT_HERSHEY_SIMPLEX, 0.80, 2, &bl);
-        cv::putText(img, "Emergency Braking",
-                    cv::Point((W - ts.width) / 2, H - 22),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.80, kWhite, 2, cv::LINE_AA);
-    } else if (fcw) {
-        const int bh = H * 28 / 100;
-        fill_rect_alpha(img, cv::Rect(0, H - bh, W, bh), cv::Scalar(0, 130, 230), 0.45);
-        paste_icon(img, g_icon_collision, W / 2, H - bh / 2 - 10);
-        int bl = 0;
-        cv::Size ts = cv::getTextSize(
-            "Collision Alert", cv::FONT_HERSHEY_SIMPLEX, 0.75, 2, &bl);
-        cv::putText(img, "Collision Alert",
-                    cv::Point((W - ts.width) / 2, H - 22),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.75, kWhite, 2, cv::LINE_AA);
+    img_f.convertTo(img, CV_8UC3, 255.0);
+}
+
+// ─── Draw: max speed limit box (top-left, Comma AI style) ────────────────────
+static void draw_speed_limit(cv::Mat& img, double speed_limit_ms) {
+    if (speed_limit_ms <= 0.0) return;
+    const int mph = static_cast<int>(std::round(speed_limit_ms * 2.23694));
+
+    char lbl[16];
+    std::snprintf(lbl, sizeof(lbl), "%d", mph);
+
+    const int box_x = 14, box_y = 14;
+    const int box_w = 68, box_h = 76;
+
+    // White rounded rectangle outline
+    cv::rectangle(img, cv::Point(box_x, box_y),
+                  cv::Point(box_x + box_w, box_y + box_h),
+                  cv::Scalar(255, 255, 255), 3, cv::LINE_AA);
+
+    // "MAX" label
+    draw_hud_text_centered(img, "MAX", box_x + box_w / 2, box_y + 20, 0.38,
+                           cv::Scalar(255, 255, 255));
+
+    // Speed number
+    draw_hud_text_centered(img, lbl, box_x + box_w / 2, box_y + 58, 0.90,
+                           cv::Scalar(255, 255, 255), 2);
+}
+
+// ─── Draw: AutoDrive-only in-path CIPO arrow (AD detects, AutoSpeed misses) ──
+// Projects AD distance onto image using world→px H, draws a red downward arrow.
+static void draw_ad_only_cipo(cv::Mat& img, const ProductionView& view) {
+    if (!view.ad_cipo_only) return;
+    if (view.ad_distance_m <= 0.f || view.ad_distance_m >= kDMax) return;
+
+    const cv::Mat& H_w2px = (!view.H_world2px.empty()) ? view.H_world2px : g_H_world2px;
+    if (H_w2px.empty()) return;
+
+    // Project world point (ad_distance_m ahead, 0 lateral) → image pixel
+    std::vector<cv::Point2f> src = {cv::Point2f(view.ad_distance_m, 0.f)}, dst;
+    cv::perspectiveTransform(src, dst, H_w2px);
+
+    const int px = static_cast<int>(std::lround(dst[0].x));
+    const int py = static_cast<int>(std::lround(dst[0].y));
+
+    if (px < 0 || px >= img.cols || py < 0 || py >= img.rows) return;
+
+    // Red downward triangle arrow
+    const int aw = 28, ah = 36;
+    const std::vector<cv::Point> tri = {
+        cv::Point(px,      py + ah),   // tip (bottom)
+        cv::Point(px - aw, py),         // top-left
+        cv::Point(px + aw, py),         // top-right
+    };
+    cv::fillConvexPoly(img, tri, cv::Scalar(0, 0, 230), cv::LINE_AA);
+    cv::polylines(img, tri, true, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
+
+    // Distance label above the arrow
+    char lbl[16];
+    std::snprintf(lbl, sizeof(lbl), "%.0fm", static_cast<double>(view.ad_distance_m));
+    int bl = 0;
+    cv::Size ts = cv::getTextSize(lbl, cv::FONT_HERSHEY_SIMPLEX, 0.52, 2, &bl);
+    const int tx = px - ts.width / 2;
+    const int ty = py - 8;
+    if (ty > ts.height) {
+        cv::rectangle(img,
+            cv::Point(tx - 4, ty - ts.height - 2),
+            cv::Point(tx + ts.width + 4, ty + 4),
+            cv::Scalar(20, 20, 20), -1);
+        cv::putText(img, lbl, cv::Point(tx, ty),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.52,
+                    cv::Scalar(0, 0, 230), 2, cv::LINE_AA);
     }
 }
 
@@ -397,11 +492,14 @@ static cv::Mat draw_production_frame(cv::Mat& frame, const ProductionView& view)
 
     cv::Mat display_frame = frame.clone();
 
-    // Render order: path → boxes → alerts → speed → CIPO text
+    // Render order: vignette → path → boxes → AD-only arrow → alerts → speed → speed limit
+    draw_top_vignette(display_frame);
     draw_path_corridor(display_frame, view);
     draw_cipo_boxes(display_frame, view);
+    draw_ad_only_cipo(display_frame, view);
     draw_alerts(display_frame, view);
     draw_speed(display_frame, view.ego_speed_ms);
+    draw_speed_limit(display_frame, view.speed_limit_ms);
 
     return display_frame;
 }
@@ -412,11 +510,13 @@ ProductionView ProductionView::from(
     const visionpilot::models::InferenceFrameResult& r,
     const Plan& plan,
     double ego_speed_ms,
-    const cv::Mat& H_resized)
+    const cv::Mat& H_resized,
+    double speed_limit_ms)
 {
     ProductionView pv;
-    pv.ego_speed_ms = ego_speed_ms;
-    pv.acceleration = plan.acceleration;
+    pv.ego_speed_ms   = ego_speed_ms;
+    pv.speed_limit_ms = speed_limit_ms;
+    pv.acceleration   = plan.acceleration;
 
     // H_resized maps resized-px → world.  Invert to get world → display-px.
     if (!H_resized.empty()) {
@@ -453,6 +553,17 @@ ProductionView ProductionView::from(
         r.cipo.cut_in_detected,
     };
 
+    // AutoDrive-only CIPO: AD confirms an in-path object (flag_prob ≥ 40%)
+    // but AutoSpeed found no bbox (cipo_raw_found == false).
+    // Show a red arrow projected at the AD-estimated distance.
+    static constexpr float D_MAX_M = 150.f;
+    if (r.auto_drive.valid &&
+        r.auto_drive.flag_prob >= 0.40f &&
+        !r.cipo.cipo_raw_found) {
+        pv.ad_cipo_only  = true;
+        pv.ad_distance_m = D_MAX_M * (1.f - r.auto_drive.dist_normalized);
+    }
+
     return pv;
 }
 
@@ -465,9 +576,10 @@ cv::Mat ProductionView::visualize(
     const visionpilot::models::InferenceFrameResult& result,
     const Plan& plan,
     double ego_speed_ms,
-    const cv::Mat& H_resized)
+    const cv::Mat& H_resized,
+    double speed_limit_ms)
 {
-    return from(result, plan, ego_speed_ms, H_resized).render(frame);
+    return from(result, plan, ego_speed_ms, H_resized, speed_limit_ms).render(frame);
 }
 
 // ─── Plain frame display (warm-up / no inference yet) ────────────────────────
@@ -502,9 +614,10 @@ cv::Mat Visualization::build_frame(cv::Mat& frame,
         const visionpilot::models::InferenceFrameResult& result,
         const Plan& plan,
         double ego_speed_ms,
-        const cv::Mat& H_resized)
+        const cv::Mat& H_resized,
+        double speed_limit_ms)
 {
-    return ProductionView::from(result, plan, ego_speed_ms, H_resized).render(frame);
+    return ProductionView::from(result, plan, ego_speed_ms, H_resized, speed_limit_ms).render(frame);
 }
 
 bool Visualization::render_frame(const cv::Mat& display_frame)
