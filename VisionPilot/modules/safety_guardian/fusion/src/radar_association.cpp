@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <utility>
 
 #include <opencv2/imgproc.hpp>
 
@@ -390,6 +391,14 @@ LongitudinalFusion::select_cipo_radar(const std::vector<models::Detection>& dets
     }
 
     const auto clusters = cluster_radar(radar, cfg_.radar_max_range_m, 1.0f, ego, have_ego);
+    std::vector<RadarClusterDebug> snaps;
+    snaps.reserve(clusters.size());
+    for (const auto& c : clusters)
+        snaps.push_back({c.range_m, c.azimuth_rad, c.range_rate, c.members});
+    auto with_snaps = [&](CIPOSelection sel) {
+        sel.clusters = snaps;
+        return sel;
+    };
 
     std::vector<models::Detection> cipo_boxes;
     for (const auto& d : dets)
@@ -442,13 +451,13 @@ LongitudinalFusion::select_cipo_radar(const std::vector<models::Detection>& dets
 
         const int ic = closest_of(clusters, candidates);
         if (ic >= 0)
-            return fill_c(clusters[static_cast<std::size_t>(ic)], cut_in,
-                          RadarHit::Path, have_box ? 1 : 3, have_box, az);
+            return with_snaps(fill_c(clusters[static_cast<std::size_t>(ic)], cut_in,
+                                     RadarHit::Path, have_box ? 1 : 3, have_box, az));
 
         CIPOSelection miss;
         miss.fov_valid  = have_box;
         miss.fov_az_rad = az;
-        return miss;
+        return with_snaps(std::move(miss));
     }
 
     if (have_box) {
@@ -462,14 +471,14 @@ LongitudinalFusion::select_cipo_radar(const std::vector<models::Detection>& dets
                               prior_ok ? std::max(1.f, prior - band) : 0.f,
                               prior_ok ? prior + band : cfg_.radar_max_range_m,
                               az, kBoxLatM, 1.0f, mc) >= 0)
-            return fill_c(mc, cut_in, RadarHit::Fov, 1, true, az);
+            return with_snaps(fill_c(mc, cut_in, RadarHit::Fov, 1, true, az));
         CIPOSelection miss;
         miss.fov_valid  = true;
         miss.fov_az_rad = az;
-        return miss;
+        return with_snaps(std::move(miss));
     }
 
-    return {};
+    return with_snaps({});
 }
 
 }  // namespace visionpilot::fusion
