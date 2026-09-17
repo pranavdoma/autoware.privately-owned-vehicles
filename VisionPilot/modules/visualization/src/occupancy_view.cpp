@@ -50,9 +50,9 @@ void on_key(int key)
   if (k == 'r' || k == 'R')
     occ_cam_reset();
   else if (k == '+' || k == '=')
-    g_occ_cam.dist = std::clamp(g_occ_cam.dist * 0.92f, 12.f, 220.f);
+    g_occ_cam.dist = std::clamp(g_occ_cam.dist * 0.92f, 12.f, 160.f);
   else if (k == '-' || k == '_')
-    g_occ_cam.dist = std::clamp(g_occ_cam.dist * 1.08f, 12.f, 220.f);
+    g_occ_cam.dist = std::clamp(g_occ_cam.dist * 1.08f, 12.f, 160.f);
 }
 
 void on_mouse(int event, int x, int y, int flags, void *)
@@ -89,7 +89,7 @@ void on_mouse(int event, int x, int y, int flags, void *)
   } else if (event == cv::EVENT_MOUSEWHEEL || event == cv::EVENT_MOUSEHWHEEL) {
     const int delta = cv::getMouseWheelDelta(flags);
     const float factor = (delta > 0) ? 0.90f : 1.11f;
-    c.dist = std::clamp(c.dist * factor, 12.f, 220.f);
+    c.dist = std::clamp(c.dist * factor, 12.f, 160.f);
   } else if (event == cv::EVENT_LBUTTONDBLCLK) {
     occ_cam_reset();
   }
@@ -365,21 +365,9 @@ static void draw_extruded_vehicle(
   }
 }
 
-static cv::Scalar radar_cluster_paint(int id, bool is_match)
-{
-  if (is_match) return cv::Scalar(50, 230, 90);
-  static const cv::Scalar kPal[] = {
-    cv::Scalar(0, 140, 255),   cv::Scalar(200, 80, 200), cv::Scalar(255, 180, 40),
-    cv::Scalar(80, 180, 255),  cv::Scalar(180, 90, 40),   cv::Scalar(90, 200, 160),
-    cv::Scalar(160, 120, 255), cv::Scalar(40, 200, 220),
-  };
-  return kPal[static_cast<size_t>(id) % (sizeof(kPal) / sizeof(kPal[0]))];
-}
-
 static cv::Scalar radar_return_paint(const Scene::RadarReturn & p)
 {
   if (p.in_match) return cv::Scalar(0, 255, 100);
-  if (p.cluster_id >= 0) return radar_cluster_paint(p.cluster_id, false);
   return p.moving ? cv::Scalar(0, 90, 160) : cv::Scalar(88, 88, 88);
 }
 
@@ -389,7 +377,7 @@ cv::Mat render(const Scene & scene)
   constexpr int pw = 560;
   constexpr int ph = 700;
   constexpr float kXMax = 150.f;
-  const float kYMax = scene.radar_enabled ? 16.f : 12.f;
+  constexpr float kYMax = 12.f;
 
   // Path-centered frame: keep the green corridor near y=0 and slide the ego
   // car by −CTE so a lane change reads as the white car moving laterally.
@@ -673,46 +661,9 @@ cv::Mat render(const Scene & scene)
   // Ego: slides laterally with CTE (lane change / lane departure) and yaws with heading error.
   draw_extruded_vehicle(panel, basis, 1.5f, ego_y, 4.5f, 1.8f, false, 0, 1.0f, false, ego_yaw);
 
-  // Radar: every return as a 3D stalk, density clusters as extruded volumes.
-  // Fusion publishes membership — this view does not recluster.
+  // Radar returns only. Vehicle volumes remain camera-derived so roadside
+  // structure cannot appear as a vehicle box.
   if (scene.radar_enabled) {
-    if (!scene.radar_clusters.empty()) {
-      cv::Mat overlay = panel.clone();
-      std::vector<const Scene::RadarCluster *> order;
-      order.reserve(scene.radar_clusters.size());
-      for (const auto & c : scene.radar_clusters) order.push_back(&c);
-      std::sort(order.begin(), order.end(), [&](const Scene::RadarCluster * a,
-                                               const Scene::RadarCluster * b) {
-        float da = 0.f, db = 0.f;
-        cv::Point ua, ub;
-        project_xyz(basis, a->cx, a->cy - y_shift, 0.f, ua, &da);
-        project_xyz(basis, b->cx, b->cy - y_shift, 0.f, ub, &db);
-        return da > db;
-      });
-      for (const auto * c : order) {
-        const float fade = depth_fade(c->cx, c->cy - y_shift);
-        const float z1 = c->is_match ? 1.65f : 1.15f;
-        extrude_box_3d(
-          overlay, basis, c->x0, c->y0 - y_shift, c->x1, c->y1 - y_shift, 0.f, z1,
-          radar_cluster_paint(c->id, c->is_match), fade * (c->is_match ? 0.90f : 0.70f),
-          c->is_match ? 1.08f : 1.02f);
-      }
-      cv::addWeighted(overlay, 0.38, panel, 0.62, 0.0, panel);
-
-      for (const auto * c : order) {
-        const float z1 = c->is_match ? 1.65f : 1.15f;
-        cv::Point tl, tr, br, bl;
-        if (!project_xyz(basis, c->x0, c->y1 - y_shift, z1, tl)) continue;
-        if (!project_xyz(basis, c->x1, c->y1 - y_shift, z1, tr)) continue;
-        if (!project_xyz(basis, c->x1, c->y0 - y_shift, z1, br)) continue;
-        if (!project_xyz(basis, c->x0, c->y0 - y_shift, z1, bl)) continue;
-        const std::vector<cv::Point> roof = {tl, tr, br, bl};
-        const cv::Scalar edge = c->is_match ? cv::Scalar(180, 255, 200)
-                                            : cv::Scalar(200, 200, 200);
-        cv::polylines(panel, roof, true, edge, c->is_match ? 2 : 1, cv::LINE_AA);
-      }
-    }
-
     struct Stick
     {
       float depth;
@@ -731,7 +682,7 @@ cv::Mat render(const Scene & scene)
       if (!project_xyz(basis, p.x, y, 0.f, s.g, &s.depth)) continue;
       if (!project_xyz(basis, p.x, y, 0.55f, s.t)) continue;
       s.c = radar_return_paint(p);
-      s.r = p.in_match ? 4 : (p.cluster_id >= 0 ? 3 : 2);
+      s.r = p.in_match ? 4 : 2;
       sticks.push_back(s);
     }
     std::sort(sticks.begin(), sticks.end(), [](const Stick & a, const Stick & b) {
@@ -771,8 +722,8 @@ cv::Mat render(const Scene & scene)
   if (scene.radar_enabled) {
     char radar_lbl[128];
     std::snprintf(
-      radar_lbl, sizeof(radar_lbl), "%zu pts  %zu clusters   L-drag orbit  R-drag pan  wheel zoom  R reset",
-      scene.radar_points.size(), scene.radar_clusters.size());
+      radar_lbl, sizeof(radar_lbl), "%zu radar pts   L-drag orbit  R-drag pan  wheel zoom  R reset",
+      scene.radar_points.size());
     cv::putText(
       panel, radar_lbl, cv::Point(12, ph - 12), cv::FONT_HERSHEY_SIMPLEX, 0.36,
       cv::Scalar(140, 150, 120), 1, cv::LINE_AA);
