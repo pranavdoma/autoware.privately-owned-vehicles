@@ -1,7 +1,6 @@
 #include <visualization/occupancy_bridge.hpp>
 #include <visualization/visual_interface.hpp>
 
-#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -76,7 +75,6 @@ Scene make_scene(
 
   s.cipo_valid = r.cipo.valid;
   s.cipo_distance_m = r.cipo.distance_m;
-  s.ego_speed_ms = ego_speed_ms;
 
   const auto & radar = r.cipo.radar;
   s.radar_enabled = radar.enabled;
@@ -95,91 +93,7 @@ Scene make_scene(
                             ? std::abs(p.range_rate + ego * std::cos(p.azimuth_rad))
                             : std::abs(p.range_rate);
       rr.moving = abs_v > 1.0f;
-      rr.cluster_id = -1;
       s.radar_points[i] = rr;
-    }
-
-    auto moving_of = [&](float range_rate, float azimuth_rad) {
-      const float abs_v = have_ego ? std::abs(range_rate + ego * std::cos(azimuth_rad))
-                                   : std::abs(range_rate);
-      return abs_v > 1.0f;
-    };
-
-    s.radar_clusters.reserve(radar.clusters.size() + 1);
-    for (int ci = 0; ci < static_cast<int>(radar.clusters.size()); ++ci) {
-      const auto & c = radar.clusters[static_cast<size_t>(ci)];
-      float xmin = 1e9f, xmax = -1e9f, ymin = 1e9f, ymax = -1e9f;
-      int n_ok = 0;
-      int n_match = 0;
-      for (int idx : c.members) {
-        if (idx < 0 || idx >= static_cast<int>(s.radar_points.size())) continue;
-        auto & pt = s.radar_points[static_cast<size_t>(idx)];
-        pt.cluster_id = ci;
-        xmin = std::min(xmin, pt.x);
-        xmax = std::max(xmax, pt.x);
-        ymin = std::min(ymin, pt.y);
-        ymax = std::max(ymax, pt.y);
-        ++n_ok;
-        if (pt.in_match) ++n_match;
-      }
-      if (n_ok == 0) continue;
-      constexpr float kPad = 0.35f;
-      constexpr float kMin = 0.80f;
-      Scene::RadarCluster box;
-      box.x0 = xmin - kPad;
-      box.x1 = xmax + kPad;
-      box.y0 = ymin - kPad;
-      box.y1 = ymax + kPad;
-      if (box.x1 - box.x0 < kMin) {
-        const float mid = 0.5f * (box.x0 + box.x1);
-        box.x0 = mid - 0.5f * kMin;
-        box.x1 = mid + 0.5f * kMin;
-      }
-      if (box.y1 - box.y0 < kMin) {
-        const float mid = 0.5f * (box.y0 + box.y1);
-        box.y0 = mid - 0.5f * kMin;
-        box.y1 = mid + 0.5f * kMin;
-      }
-      box.cx = c.range_m * std::cos(c.azimuth_rad);
-      box.cy = c.range_m * std::sin(c.azimuth_rad);
-      box.id = ci;
-      box.n = n_ok;
-      box.is_match = (n_match * 2 >= n_ok);
-      box.moving = moving_of(c.range_rate, c.azimuth_rad);
-      s.radar_clusters.push_back(box);
-    }
-
-    // FOV-window association can pick a set that is not one DBSCAN cluster.
-    // Keep a dedicated match volume so Occupancy still shows the CIPO set.
-    bool match_covered = false;
-    for (const auto & box : s.radar_clusters)
-      if (box.is_match) match_covered = true;
-    if (!match_covered) {
-      float xmin = 1e9f, xmax = -1e9f, ymin = 1e9f, ymax = -1e9f;
-      int n_ok = 0;
-      for (const auto & pt : s.radar_points) {
-        if (!pt.in_match) continue;
-        xmin = std::min(xmin, pt.x);
-        xmax = std::max(xmax, pt.x);
-        ymin = std::min(ymin, pt.y);
-        ymax = std::max(ymax, pt.y);
-        ++n_ok;
-      }
-      if (n_ok > 0) {
-        constexpr float kPad = 0.35f;
-        Scene::RadarCluster box;
-        box.x0 = xmin - kPad;
-        box.x1 = xmax + kPad;
-        box.y0 = ymin - kPad;
-        box.y1 = ymax + kPad;
-        box.cx = 0.5f * (box.x0 + box.x1);
-        box.cy = 0.5f * (box.y0 + box.y1);
-        box.id = static_cast<int>(s.radar_clusters.size());
-        box.n = n_ok;
-        box.is_match = true;
-        box.moving = false;
-        s.radar_clusters.push_back(box);
-      }
     }
   }
 
