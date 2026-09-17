@@ -19,23 +19,12 @@ struct PathPoly {  // y = a·x² + b·x + c, same frame as radar
 // ─── Output ────────────────────────────────────────────────────────────────────
 enum class RadarHit { None, Fov, Path, L3 };
 
-// One density cluster from this sweep (DBSCAN neighbourhood). Occupancy / BEV
-// paint these instead of reclustering.
-struct RadarClusterDebug {
-    float range_m = 0.f;
-    float azimuth_rad = 0.f;
-    float range_rate = 0.f;
-    std::vector<int> members;
-};
-
-// Snapshot for --debug-viz BEV and Occupancy. in_match / match_* are the
-// association result itself, so the panel never has to re-derive (and
-// disagree about) the answer. clusters is every density group this frame.
+// Snapshot for --debug-viz BEV. in_match / match_* are the association result
+// itself, so the panel never has to re-derive (and disagree about) the answer.
 struct RadarAssocDebug {
     bool enabled = false;
     std::vector<RadarPoint> points;
     std::vector<uint8_t> in_match;   // per point: belongs to the selected cluster
-    std::vector<RadarClusterDebug> clusters;
     PathPoly path;
     bool  fov_valid      = false;
     float fov_az_rad     = 0.f;
@@ -164,7 +153,6 @@ private:
         std::vector<int> members;
         int scenario = 0;
         RadarHit hit = RadarHit::None;
-        std::vector<RadarClusterDebug> clusters;
     };
     CIPOSelection select_cipo(const std::vector<models::Detection>& dets) const;
     CIPOSelection select_cipo_radar(const std::vector<models::Detection>& dets,
