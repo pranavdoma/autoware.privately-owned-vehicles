@@ -708,7 +708,7 @@ cv::Mat render(const Scene & scene)
   fill_rect_alpha(panel, cv::Rect(0, 0, pw, 26), cv::Scalar(10, 9, 8), 0.62);
   cv::line(panel, cv::Point(0, 26), cv::Point(pw, 26), cv::Scalar(90, 110, 55), 1, cv::LINE_AA);
   cv::putText(
-    panel, scene.radar_enabled ? "OCCUPANCY  ·  RADAR" : "OCCUPANCY", cv::Point(12, 18),
+    panel, scene.radar_enabled ? "OCCUPANCY | RADAR" : "OCCUPANCY", cv::Point(12, 18),
     cv::FONT_HERSHEY_SIMPLEX, 0.45, cv::Scalar(210, 220, 180), 1, cv::LINE_AA);
   char range_lbl[32];
   std::snprintf(range_lbl, sizeof(range_lbl), "0-%.0fm", static_cast<double>(kXMax));
