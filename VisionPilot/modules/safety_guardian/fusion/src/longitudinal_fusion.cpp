@@ -96,7 +96,6 @@ CIPOFusionEstimate LongitudinalFusion::update(
         est.radar.fov_az_rad = sel.fov_az_rad;
         est.radar.match_i    = sel.match_i;
         est.radar.hit        = sel.hit;
-        est.radar.clusters   = sel.clusters;
         est.radar_scenario   = sel.scenario;
         if (radar_meas.valid) {
             est.radar_meas_valid    = true;
