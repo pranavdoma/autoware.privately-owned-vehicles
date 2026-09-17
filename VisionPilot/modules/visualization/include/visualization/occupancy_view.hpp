@@ -46,30 +46,18 @@ struct Scene
   bool ad_cipo_only = false;
   float ad_distance_m = 0.f;
 
-  // Radar in the same ego frame as the path (X forward, Y left). Occupancy
-  // paints returns and density clusters in 3D; it does not recluster.
-  float ego_speed_ms = 0.f;
+  // Radar in the same ego frame as the path (X forward, Y left).
+  // Occupancy paints returns only; vehicle boxes remain camera-derived.
   bool radar_enabled = false;
   struct RadarReturn
   {
     float x = 0.f;
     float y = 0.f;
     float range_rate = 0.f;
-    int cluster_id = -1;  // -1 = unclustered
     bool in_match = false;
     bool moving = false;
   };
-  struct RadarCluster
-  {
-    float x0 = 0.f, y0 = 0.f, x1 = 0.f, y1 = 0.f;
-    float cx = 0.f, cy = 0.f;
-    int id = 0;
-    int n = 0;
-    bool is_match = false;
-    bool moving = false;
-  };
   std::vector<RadarReturn> radar_points;
-  std::vector<RadarCluster> radar_clusters;
 };
 
 // Heuristic 3D occupancy / BEV panel (separate window).
